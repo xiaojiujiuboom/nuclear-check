@@ -182,10 +182,10 @@ with st.sidebar:
     st.caption("Powered by Google Gemini & Streamlit")
 
 st.title("Nuclear Knowledge Hub")
-st.caption("🚀 专业的核科学事实核查与学术检索平台")
+st.caption("🚀 核科学事实核查与学术检索平台")
 
 # 创建两个独立的 Tabs
-tab1, tab2 = st.tabs(["🛡️ 智能核查 (Check)", "🔬 学术检索 (Search)"])
+tab1, tab2 = st.tabs(["🔍智能核查 (Check)", "🔬学术检索 (Search)"])
 
 # ==========================================
 # 模块一：智能核查 (Nuclear Check)
@@ -195,7 +195,7 @@ with tab1:
 
     with col1_check:
         st.markdown("#### 📝 输入待核查内容")
-        user_text_check = st.text_area("待核查文本", height=400, label_visibility="collapsed", placeholder="在此粘贴新闻报道、文章片段或输入问题...\n例如：中国现在有多少座核电站？", key="input_check")
+        user_text_check = st.text_area("待核查文本", height=400, label_visibility="collapsed", placeholder="在此粘贴待核实信息...\n例如：中国现在有58座核电站？", key="input_check")
         check_btn = st.button("🚀 开始深度核查", type="primary", use_container_width=True, key="btn_check")
 
     with col2_check:
