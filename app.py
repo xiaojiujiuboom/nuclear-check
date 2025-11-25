@@ -248,7 +248,7 @@ with tab1:
                         "tools": [{"google_search": {}}]
                     }
                     
-                    status_box.write("🔍 正在联网检索最新权威数据 (IAEA/NEA/CNEA)...")
+                    status_box.write("🔍 正在联网检索最新数据...")
                     
                     try:
                         response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload)
