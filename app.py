@@ -83,32 +83,37 @@ st.markdown("""
             border-color: #fc8181;
         }
 
+        /* 证据容器样式 (优化版) 
+           改为浅色背景 + 深色文字，确保在白底背景下也能清晰阅读
+        */
         .evidence-container {
-            background-color: #1a202c;
+            background-color: #f8f9fa; /* 浅灰偏白背景 */
             border-radius: 6px;
-            padding: 12px;
+            padding: 15px;
             margin-top: 12px;
-            border: 1px solid #2d3748;
+            border: 1px solid #e9ecef;
         }
 
         .quote-item {
-            border-left: 3px solid #718096;
+            border-left: 3px solid #63b3ed;
             padding-left: 10px;
             margin-bottom: 8px;
-            color: #cbd5e0;
+            color: #1f2937; /* 深灰/黑色文字，高对比度 */
             font-size: 0.95em;
             font-family: "Noto Serif SC", serif;
+            line-height: 1.5;
         }
         
         .tag-pill {
             display: inline-block;
             padding: 2px 8px;
-            border-radius: 12px;
+            border-radius: 4px;
             font-size: 0.75em;
             font-weight: bold;
             margin-right: 5px;
-            background-color: #4a5568;
-            color: #a0aec0;
+            background-color: #e2e8f0; /* 浅色胶囊背景 */
+            color: #2d3748; /* 深色胶囊文字 */
+            border: 1px solid #cbd5e0;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -173,7 +178,7 @@ with st.sidebar:
     st.title("⚛️ Nuclear Hub")
     st.info(
         """
-        **版本**: Pro Max v2.0
+        **版本**: Pro Max v2.1
         
         本平台集成了 Google Gemini 2.5 Flash 模型，
         具备实时联网核查与深度学术检索能力。
@@ -302,7 +307,7 @@ with tab1:
 
                                             if evidence_list:
                                                 st.markdown('<div class="evidence-container">', unsafe_allow_html=True)
-                                                st.markdown('<div style="color: #8ab4f8; margin-bottom: 8px; font-weight:bold;">🔍 权威数据/原文证据：</div>', unsafe_allow_html=True)
+                                                st.markdown('<div style="color: #555; margin-bottom: 8px; font-weight:bold;">🔍 权威数据/原文证据：</div>', unsafe_allow_html=True)
                                                 for ev in evidence_list:
                                                     source_name = ev.get('source_name', '来源')
                                                     content = ev.get('content', '')
@@ -374,11 +379,11 @@ with tab2:
                     请输出一个纯 JSON 列表。
                     每个对象结构如下：
                     {{
-                        "title": "标题 (必须完全匹配搜索结果)",
+                        "title": "标题 (必须完全匹配搜索结果，如果是英文，请在括号内附上中文翻译)",
                         "authors": "作者/机构 (仅提取搜索结果中显示的)",
                         "publication": "来源 (如 Nature, IAEA)",
                         "year": "年份",
-                        "summary": "基于搜索摘要的简述",
+                        "summary": "基于搜索摘要的详细简述 (请保留英文原文，并在后面附带中文翻译)",
                         "doi": "仅在搜索结果中明确看到DOI时填写，否则为空字符串",
                         "url": "搜索结果对应的真实URL"
                     }}
