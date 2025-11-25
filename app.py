@@ -339,7 +339,7 @@ with tab2:
     with col1_search:
         st.markdown("#### 🔍 学术搜索引擎")
         search_query = st.text_input("请输入研究课题、关键词或问题", label_visibility="collapsed", placeholder="例如：可控核聚变 2024年 突破性进展 Q值", key="input_search")
-        st.caption("支持中英文输入。系统将自动检索 Google Scholar, Nature, Science, IAEA 等权威数据库。")
+        st.caption("支持中英文输入。系统将自动检索数据库。")
         search_btn = st.button("🔬 开始学术检索", type="primary", use_container_width=True, key="btn_search")
 
     with col2_search:
