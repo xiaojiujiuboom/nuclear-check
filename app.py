@@ -4,24 +4,34 @@ import json
 import re
 import time
 
-# --- 1. 配置区域 ---
-# 必须填入你的 Key (请确保该 Key 有权限使用 Google Search Grounding 功能)
-API_KEY = "AIzaSyDuW0mTAhwFjEX1_Gnb-LnExvZVpYUzgHk"  
+# --- 1. 配置区域 (安全模式) ---
+# 这里的代码不再包含你的 Key，而是告诉程序去 Streamlit 保险箱里找
+try:
+    # 尝试从 Streamlit Cloud 的 Secrets 读取 Key
+    API_KEY = st.secrets["GEMINI_API_KEY"]
+except FileNotFoundError:
+    # 如果本地运行没有配置 secrets，或者云端没填 Key
+    st.warning("⚠️ 未检测到 API Key。请在 Streamlit 网站后台的 Secrets 中配置 GEMINI_API_KEY。")
+    API_KEY = "" # 暂时留空
 
 # --- 2. 页面设置 ---
-st.set_page_config(page_title="智能核查助手 (Pro Max)", layout="wide", page_icon="⚛️")
+st.set_page_config(
+    page_title="Nuclear Knowledge Hub", 
+    layout="wide", 
+    page_icon="⚛️",
+    initial_sidebar_state="expanded"
+)
 
 # --- CSS 样式优化：适配深色模式 & Tab样式 ---
 st.markdown("""
     <style>
-        .block-container {padding-top: 2rem;}
-        header, footer {visibility: hidden;}
+        .block-container {padding-top: 1.5rem;}
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
         
         /* -----------------------
            通用深色模式适配
            ----------------------- */
-        
-        /* 1. 核查卡片 (Check Card) - 保持之前的风格 */
         .check-card {
             border: 1px solid #464b59;
             border-radius: 8px;
@@ -32,19 +42,17 @@ st.markdown("""
             box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
         
-        /* 2. 学术检索卡片 (Research Card) - 新增风格 */
         .research-card {
-            border: 1px solid #4a5568; /* 偏蓝灰 */
-            border-left: 5px solid #63b3ed; /* 亮蓝色左边框 */
+            border: 1px solid #4a5568; 
+            border-left: 5px solid #63b3ed;
             border-radius: 8px;
             padding: 1.5rem;
             margin-bottom: 1rem;
-            background-color: #2d3748; /* 深蓝灰背景 */
+            background-color: #2d3748; 
             color: #e2e8f0;
             box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
 
-        /* 来源链接样式 - 通用 */
         .source-link {
             display: inline-block;
             background-color: #363945;
@@ -64,10 +72,9 @@ st.markdown("""
             border-color: #ff4b4b;
         }
         
-        /* Sci-Hub 按钮特化样式 */
         .scihub-btn {
-            background-color: #2c0b0e; /* 深红色背景 */
-            color: #fc8181 !important; /* 浅红文字 */
+            background-color: #2c0b0e;
+            color: #fc8181 !important;
             border: 1px solid #822727;
         }
         .scihub-btn:hover {
@@ -76,26 +83,23 @@ st.markdown("""
             border-color: #fc8181;
         }
 
-        /* 证据引文容器样式 */
         .evidence-container {
-            background-color: #1a202c; /* 更深的背景 */
+            background-color: #1a202c;
             border-radius: 6px;
             padding: 12px;
             margin-top: 12px;
             border: 1px solid #2d3748;
         }
 
-        /* 单条证据样式 */
         .quote-item {
             border-left: 3px solid #718096;
             padding-left: 10px;
             margin-bottom: 8px;
             color: #cbd5e0;
             font-size: 0.95em;
-            font-family: "Noto Serif SC", serif; /* 学术感字体 */
+            font-family: "Noto Serif SC", serif;
         }
         
-        /* 标签样式 */
         .tag-pill {
             display: inline-block;
             padding: 2px 8px;
@@ -106,16 +110,12 @@ st.markdown("""
             background-color: #4a5568;
             color: #a0aec0;
         }
-
     </style>
 """, unsafe_allow_html=True)
 
 # --- 3. 自动寻找可用模型函数 ---
 def get_available_model(api_key):
-    """
-    寻找支持 generateContent 的模型。
-    强制优先使用 gemini-2.5-flash 或 gemini-1.5-flash。
-    """
+    if not api_key: return None, "API Key 未配置"
     url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
     try:
         response = requests.get(url)
@@ -168,11 +168,24 @@ def parse_json_response(text):
         return None
 
 # --- 5. 核心页面逻辑 ---
-st.subheader("⚛️ Nuclear Knowledge Hub")
-st.caption("核科学事实核查与学术检索")
+# 侧边栏
+with st.sidebar:
+    st.title("⚛️ Nuclear Hub")
+    st.info(
+        """
+        **版本**: Pro Max v2.0
+        
+        本平台集成了 Google Gemini 2.5 Flash 模型，
+        具备实时联网核查与深度学术检索能力。
+        """
+    )
+    st.caption("Powered by Google Gemini & Streamlit")
+
+st.title("Nuclear Knowledge Hub")
+st.caption("🚀 专业的核科学事实核查与学术检索平台")
 
 # 创建两个独立的 Tabs
-tab1, tab2 = st.tabs(["🔍 智能核查 (Check)", "🔬 学术检索 (Search)"])
+tab1, tab2 = st.tabs(["🛡️ 智能核查 (Check)", "🔬 学术检索 (Search)"])
 
 # ==========================================
 # 模块一：智能核查 (Nuclear Check)
@@ -181,13 +194,15 @@ with tab1:
     col1_check, col2_check = st.columns([1, 1], gap="large")
 
     with col1_check:
-        user_text_check = st.text_area("待核查文本", height=400, placeholder="例如：中国现在有57座核电站？", key="input_check")
+        st.markdown("#### 📝 输入待核查内容")
+        user_text_check = st.text_area("待核查文本", height=400, label_visibility="collapsed", placeholder="在此粘贴新闻报道、文章片段或输入问题...\n例如：中国现在有多少座核电站？", key="input_check")
         check_btn = st.button("🚀 开始深度核查", type="primary", use_container_width=True, key="btn_check")
 
     with col2_check:
+        st.markdown("#### 📊 核查报告")
         if check_btn and user_text_check:
-            if not API_KEY.startswith("AIza"):
-                st.error("请先在代码第 8 行填入正确的 API Key")
+            if not API_KEY:
+                st.error("🔒 API Key 未配置！请在 Streamlit 网站的 Secrets 中填入 Key，而不是填在代码里。")
             else:
                 status_box = st.status("正在启动核查引擎...", expanded=True)
                 
@@ -201,7 +216,6 @@ with tab1:
                     if not model_name.startswith("models/"): model_name = f"models/{model_name}"
                     api_url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
                     
-                    # 核查 Prompt
                     prompt_check = f"""
                     你是一个严谨的核聚变与等离子体物理专家，同时拥有实时联网核查的能力。
                     请利用 Google Search 工具，核查以下文本中的每一个事实陈述。
@@ -256,7 +270,6 @@ with tab1:
                                     
                                     for item in check_results:
                                         status = item.get('status', '存疑')
-                                        # 样式逻辑
                                         if "错" in status:
                                             border_color = "#ff4b4b"
                                             icon = "❌"
@@ -284,19 +297,16 @@ with tab1:
                                             """, unsafe_allow_html=True)
                                             
                                             evidence_list = item.get('evidence_list', [])
-                                            # 兼容旧格式
                                             if not evidence_list and 'evidence_quote' in item:
                                                 evidence_list = [{'source_name': '权威数据', 'content': item['evidence_quote'], 'url': '#'}]
 
                                             if evidence_list:
                                                 st.markdown('<div class="evidence-container">', unsafe_allow_html=True)
                                                 st.markdown('<div style="color: #8ab4f8; margin-bottom: 8px; font-weight:bold;">🔍 权威数据/原文证据：</div>', unsafe_allow_html=True)
-                                                
                                                 for ev in evidence_list:
                                                     source_name = ev.get('source_name', '来源')
                                                     content = ev.get('content', '')
                                                     url = ev.get('url', '#')
-                                                    
                                                     st.markdown(f"""
                                                     <div class="quote-item">
                                                         <span class="tag-pill">[{source_name}]</span>
@@ -305,7 +315,6 @@ with tab1:
                                                         <a href="{url}" target="_blank" class="source-link" style="margin-top:4px; display:inline-block;">🔗 来源</a>
                                                     </div>
                                                     """, unsafe_allow_html=True)
-                                                
                                                 st.markdown('</div>', unsafe_allow_html=True)
                                             st.markdown("</div>", unsafe_allow_html=True)
 
@@ -328,14 +337,16 @@ with tab2:
     col1_search, col2_search = st.columns([1, 1], gap="large")
     
     with col1_search:
-        search_query = st.text_input("请输入研究课题、关键词或问题", placeholder="例如：可控核聚变 2024年 突破性进展 Q值", key="input_search")
-        st.caption("支持中英文输入。系统将自动检索数据库。")
+        st.markdown("#### 🔍 学术搜索引擎")
+        search_query = st.text_input("请输入研究课题、关键词或问题", label_visibility="collapsed", placeholder="例如：可控核聚变 2024年 突破性进展 Q值", key="input_search")
+        st.caption("支持中英文输入。系统将自动检索 Google Scholar, Nature, Science, IAEA 等权威数据库。")
         search_btn = st.button("🔬 开始学术检索", type="primary", use_container_width=True, key="btn_search")
 
     with col2_search:
+        st.markdown("#### 📚 检索结果")
         if search_btn and search_query:
-            if not API_KEY.startswith("AIza"):
-                st.error("API Key 无效")
+            if not API_KEY:
+                st.error("🔒 API Key 未配置！请在 Streamlit 网站的 Secrets 中填入 Key。")
             else:
                 status_box_search = st.status("正在进行深度学术检索...", expanded=True)
                 
@@ -344,7 +355,6 @@ with tab2:
                     if not model_name.startswith("models/"): model_name = f"models/{model_name}"
                     api_url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
                     
-                    # 学术检索 Prompt (升级版 - 防幻觉)
                     prompt_search = f"""
                     你是一位资深的核科学研究员。请利用 Google Search 为用户寻找**真实存在**的学术文献。
                     
@@ -352,8 +362,8 @@ with tab2:
                     
                     **严厉禁止 (Anti-Hallucination)：**
                     1. **严禁编造**论文标题、作者、期刊或链接。
-                    2. **严禁拼凑**不同来源的信息（例如：用A论文的标题配B论文的链接）。
-                    3. 如果搜索结果中没有提供PDF链接或DOI，**请留空**，不要根据经验猜测 URL。
+                    2. **严禁拼凑**不同来源的信息。
+                    3. 如果搜索结果中没有提供PDF链接或DOI，**请留空**。
                     
                     **执行步骤：**
                     1. 使用 Google Search 搜索相关的高质量学术来源（Nature, Science, IAEA, ITER, PRL等）。
@@ -361,7 +371,7 @@ with tab2:
                     3. **链接(url)** 必须直接来自搜索结果中的真实网址，确保可访问。
                     
                     **输出格式：**
-                    请输出一个纯 JSON 列表。如果找不到确切的学术论文，可以返回相关的权威新闻或技术报告。
+                    请输出一个纯 JSON 列表。
                     每个对象结构如下：
                     {{
                         "title": "标题 (必须完全匹配搜索结果)",
@@ -403,7 +413,6 @@ with tab2:
                                         url = item.get('url', '#')
                                         
                                         with st.container():
-                                            # 学术卡片头部
                                             st.markdown(f"""
                                             <div class="research-card">
                                                 <div style="font-size: 1.2em; font-weight: bold; color: #63b3ed; margin-bottom: 5px;">
@@ -419,26 +428,18 @@ with tab2:
                                                 </div>
                                             """, unsafe_allow_html=True)
                                             
-                                            # 操作按钮区
                                             col_links = st.columns([1, 1, 4])
-                                            
-                                            # 1. 原文链接
                                             st.markdown(f'<a href="{url}" target="_blank" class="source-link">🔗 原文/Abstract</a>', unsafe_allow_html=True)
-                                            
-                                            # 2. Sci-Hub 下载按钮 (如果有 DOI)
-                                            if doi and len(doi) > 5: # 简单过滤无效DOI
+                                            if doi and len(doi) > 5:
                                                 scihub_url = f"https://x.sci-hub.org.cn/{doi}"
                                                 st.markdown(f'<a href="{scihub_url}" target="_blank" class="source-link scihub-btn">🔓 Sci-Hub 下载</a>', unsafe_allow_html=True)
-                                            
                                             st.markdown("</div>", unsafe_allow_html=True)
                                 else:
-                                    st.warning("未能解析搜索结果，以下是原始回答：")
+                                    st.warning("未能解析搜索结果")
                                     st.markdown(raw_content)
-                                    
                             except Exception as e:
                                 st.error(f"解析错误: {e}")
                         else:
                             st.error(f"请求失败: {response.status_code}")
-                            
                     except Exception as e:
                         st.error(f"网络错误: {e}")
