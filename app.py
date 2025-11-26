@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import json
 import re
-import urllib.parse
+import time
 
 # --- 1. 页面配置 (必须在最前面) ---
 st.set_page_config(
@@ -95,17 +95,6 @@ st.markdown("""
             color: #feb2b2 !important;
             border-color: #fc8181;
         }
-        
-        /* 辅助按钮样式 (Google Search) - 强调色 */
-        .search-btn {
-            background-color: #2b6cb0; /* 蓝色背景 */
-            color: #fff !important;
-            border: 1px solid #4299e1;
-        }
-        .search-btn:hover {
-            background-color: #3182ce;
-            border-color: #63b3ed;
-        }
 
         .evidence-container {
             background-color: #f8f9fa; 
@@ -184,6 +173,7 @@ def parse_json_response(text):
         text = re.sub(r'```json\s*', '', text)
         text = re.sub(r'```\s*$', '', text)
         text = text.strip()
+        
         return json.loads(text)
     except Exception:
         try:
@@ -203,7 +193,7 @@ def parse_json_response(text):
 # --- 6. 主逻辑 ---
 with st.sidebar:
     st.title("⚛️ Nuclear Hub")
-    st.info("**版本**: Pro Max v2.9 (Original Direct Links)")
+    st.info("**版本**: Pro Max v2.4 (Fix URL & Trans)")
     st.caption("Powered by Google Gemini & Streamlit")
 
 st.title("Nuclear Knowledge Hub")
@@ -238,22 +228,17 @@ with tab1:
                     if not model_name.startswith("models/"): model_name = f"models/{model_name}"
                     api_url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
                     
-                    # --- 核查 Prompt 升级：强制深层链接 ---
                     prompt_check = f"""
                     你是一个严谨的核聚变与等离子体物理专家。请利用 Google Search 工具核查以下文本。
 
                     **文本：** '''{user_text_check}'''
 
-                    **关键要求 (Critical Requirements)：**
-                    1. **链接精准度 (Direct Original Links Only)**：
-                       - **必须提供数据来源的原始网页链接**。
-                       - 仔细检查链接：不要使用 google 的跳转链接 (grounding-api-redirect)，请找到该跳转指向的**真实目标网址** (Target URL)。
-                       - 如果搜索结果显示的是 PDF，请尽量提供 PDF 的直接链接。
-                       - **不要**为了填空而填官网主页。必须是具体内容的页面。
-                    
-                    2. **双语引用 (Bilingual Quote)**：
+                    **关键要求：**
+                    1. **多源数据**：如果数据冲突（如 IAEA vs 官方），必须列出各方数据。
+                    2. **强制翻译引用**：
+                       - 必须引用查找资料的原话。
                        - **如果原文是英文，必须在后面紧跟中文翻译**。
-                       - 格式：`"English Original Text..." (译: 中文翻译...)`。
+                       - 格式："...English text... (译文: ...中文...)"
 
                     **输出格式 (JSON List):**
                     [
@@ -265,7 +250,7 @@ with tab1:
                                 {{
                                     "source_name": "机构名",
                                     "content": "原文证据 (若为英文需附翻译)",
-                                    "url": "原始文章页面的真实URL"
+                                    "url": "链接"
                                 }}
                             ]
                         }}
@@ -277,7 +262,7 @@ with tab1:
                         "tools": [{"google_search": {}}]
                     }
                     
-                    status_box.write("🔍 正在联网检索 (寻找原始出处)...")
+                    status_box.write("🔍 正在联网检索...")
                     
                     try:
                         response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload)
@@ -330,21 +315,16 @@ with tab1:
                                             if evidence_list:
                                                 st.markdown('<div class="evidence-container">', unsafe_allow_html=True)
                                                 st.markdown('<div style="color: #555; margin-bottom: 8px; font-weight:bold;">🔍 权威数据/原文证据：</div>', unsafe_allow_html=True)
-                                                
                                                 for ev in evidence_list:
                                                     source_name = ev.get('source_name', '来源')
                                                     content = ev.get('content', '')
                                                     url = ev.get('url', '#')
-                                                    
-                                                    # 恢复为直接展示原链接
-                                                    link_text = "🔗 来源链接"
-
                                                     st.markdown(f"""
                                                     <div class="quote-item">
                                                         <span class="tag-pill">[{source_name}]</span>
-                                                        {content}
+                                                        "{content}"
                                                         <br>
-                                                        <a href="{url}" target="_blank" class="source-link" style="margin-top:4px; display:inline-block;">{link_text}</a>
+                                                        <a href="{url}" target="_blank" class="source-link" style="margin-top:4px; display:inline-block;">🔗 来源</a>
                                                     </div>
                                                     """, unsafe_allow_html=True)
                                                 st.markdown('</div>', unsafe_allow_html=True)
@@ -360,7 +340,7 @@ with tab1:
                         st.error(f"网络错误: {e}")
 
 # ==========================================
-# 模块二：学术检索 (双语对照+深层链接)
+# 模块二：学术检索 (重点修复链接与翻译)
 # ==========================================
 with tab2:
     col1_search, col2_search = st.columns([1, 1], gap="large")
@@ -383,41 +363,35 @@ with tab2:
                     if not model_name.startswith("models/"): model_name = f"models/{model_name}"
                     api_url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
                     
-                    # --- 检索 Prompt 升级：强制提取具体 URL ---
+                    # --- 核心修改：防幻觉 Prompt + 强制分离翻译字段 ---
                     prompt_search = f"""
                     你是一位核科学研究员。请利用 Google Search 寻找真实文献。
                     
                     **用户课题：** "{search_query}"
                     
-                    **执行步骤 (Chain of Thought):**
-                    1. 使用具体的关键词搜索 (例如包含 "site:nature.com" 或 "filetype:pdf")。
-                    2. 在搜索结果中，寻找**具体的文章页面**或**PDF文档**。
-                    3. 提取该结果的**完整URL**。
+                    **严格指令 (Anti-Hallucination):**
+                    1. **链接真实性校验**：
+                       - 你输出的 `url` 必须**严格等于**搜索结果中提供的 Snippet URL。
+                       - **严禁**自己拼凑链接（不要猜测 nature.com/articles/... 这种链接，除非搜索结果里明确写了）。
+                       - 如果搜索结果里没有直接的论文链接，就不要列出那条结果。
                     
-                    **严格指令 (Strict Rules):**
-                    1. **URL必须是深层链接 (DEEP LINK REQUIRED)**：
-                       - **严禁**提供期刊首页 (如 www.nature.com)。
-                       - **必须**提供具体文章页 (如 www.nature.com/articles/...)。
-                       - **严禁**使用 `google.com/grounding-api-redirect`。
-                       - 如果找不到直接链接，不要编造，留空即可。
-                    
-                    2. **双语内容 (Bilingual)**：
-                       - 标题和摘要必须同时包含英文原文和中文翻译。
+                    2. **强制翻译 (Mandatory Translation)**：
+                       - JSON中必须包含 `title_en` (原标题) 和 `title_zh` (中文翻译) 两个独立字段。
+                       - JSON中必须包含 `summary_zh` (中文摘要)。不要写英文摘要。
 
                     **输出格式 (JSON Object):**
                     {{
-                        "overview": "150字左右的中文综述...",
+                        "overview": "150字左右的中文综述，总结该领域的最新进展...",
                         "papers": [
                             {{
-                                "title_en": "Original English Title",
-                                "title_zh": "中文翻译标题",
-                                "authors": "Authors",
-                                "publication": "Source",
+                                "title_en": "English Title strictly from search result",
+                                "title_zh": "这里写中文翻译",
+                                "authors": "Author/Institution",
+                                "publication": "Source (e.g. Nature)",
                                 "year": "Year",
-                                "summary_en": "Original English Abstract...",
-                                "summary_zh": "中文翻译摘要...",
-                                "doi": "DOI string",
-                                "url": "EXACT DEEP URL from search result"
+                                "summary_zh": "这里写详细的中文摘要",
+                                "doi": "DOI or empty string",
+                                "url": "MUST be the EXACT URL from the search snippet"
                             }}
                         ]
                     }}
@@ -469,39 +443,18 @@ with tab2:
                                     if papers:
                                         st.success(f"检索到 {len(papers)} 篇相关高价值文献")
                                         for item in papers:
-                                            title = item.get('title_en', item.get('title', 'Unknown'))
+                                            # 获取字段，优先使用分立的翻译字段
+                                            title_en = item.get('title_en', item.get('title', 'Unknown Title'))
                                             title_zh = item.get('title_zh', '')
-                                            summary_en = item.get('summary_en', item.get('summary', ''))
-                                            summary_zh = item.get('summary_zh', '')
+                                            summary = item.get('summary_zh', item.get('summary', '暂无摘要'))
                                             
-                                            display_title = title
+                                            # 组合标题显示
+                                            display_title = title_en
                                             if title_zh:
-                                                display_title = f"{title}<br><span style='font-size:0.8em; color:#a0aec0; font-weight:normal'>{title_zh}</span>"
+                                                display_title = f"{title_en}<br><span style='font-size:0.8em; color:#a0aec0; font-weight:normal'>{title_zh}</span>"
                                             
-                                            display_summary = summary_en
-                                            if summary_zh:
-                                                display_summary = f"{summary_en}<br><br><span style='color:#90cdf4;'>[译] {summary_zh}</span>"
-
                                             doi = item.get('doi', '')
                                             url = item.get('url', '#')
-                                            
-                                            # 链接智能验证
-                                            scholar_btn_text = "🔍 Google Scholar"
-                                            
-                                            # 如果链接看起来像根域名或无效
-                                            is_deep_link = True
-                                            if not url or "grounding-api-redirect" in url or url == '#' or url.count('/') <= 3:
-                                                is_deep_link = False
-                                                # 构造精准搜索
-                                                scholar_q = urllib.parse.quote(title)
-                                                url = f"https://scholar.google.com/scholar?q={scholar_q}"
-                                                url_text = "🔍 搜索原文 (Smart Search)"
-                                            else:
-                                                url_text = "🔗 查看原文 (Direct Link)"
-
-                                            # 备用 Scholar 链接
-                                            scholar_q_safe = urllib.parse.quote(title)
-                                            scholar_url_safe = f"https://scholar.google.com/scholar?q={scholar_q_safe}"
                                             
                                             with st.container():
                                                 st.markdown(f"""
@@ -515,19 +468,15 @@ with tab2:
                                                     </div>
                                                     <div style="border-top: 1px solid #4a5568; margin-bottom: 10px;"></div>
                                                     <div style="line-height: 1.6; color: #cbd5e0; font-family: 'Noto Serif SC', serif;">
-                                                        {display_summary}
+                                                        {summary}
                                                     </div>
                                                 """, unsafe_allow_html=True)
                                                 
-                                                col_links = st.columns([1, 1, 1.5, 3])
-                                                
-                                                st.markdown(f'<a href="{url}" target="_blank" class="source-link">{url_text}</a>', unsafe_allow_html=True)
-                                                st.markdown(f'<a href="{scholar_url_safe}" target="_blank" class="source-link search-btn">{scholar_btn_text}</a>', unsafe_allow_html=True)
-
+                                                col_links = st.columns([1, 1, 4])
+                                                st.markdown(f'<a href="{url}" target="_blank" class="source-link">🔗 原文链接/Source</a>', unsafe_allow_html=True)
                                                 if doi and len(doi) > 5:
                                                     scihub_url = f"https://x.sci-hub.org.cn/{doi}"
                                                     st.markdown(f'<a href="{scihub_url}" target="_blank" class="source-link scihub-btn">🔓 Sci-Hub 下载</a>', unsafe_allow_html=True)
-                                                
                                                 st.markdown("</div>", unsafe_allow_html=True)
                                     else:
                                         st.warning("未找到具体的文献列表。")
@@ -537,6 +486,6 @@ with tab2:
                             except Exception as e:
                                 st.error(f"解析错误: {e}")
                         else:
-                            st.error(f"API 请求失败: {response.status_code}")
+                            st.error(f"请求失败: {response.status_code}")
                     except Exception as e:
                         st.error(f"网络错误: {e}")
