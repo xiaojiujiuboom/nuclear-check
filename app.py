@@ -4,17 +4,7 @@ import json
 import re
 import time
 
-# --- 1. 配置区域 (安全模式) ---
-# 这里的代码不再包含你的 Key，而是告诉程序去 Streamlit 保险箱里找
-try:
-    # 尝试从 Streamlit Cloud 的 Secrets 读取 Key
-    API_KEY = st.secrets["GEMINI_API_KEY"]
-except FileNotFoundError:
-    # 如果本地运行没有配置 secrets，或者云端没填 Key
-    st.warning("⚠️ 未检测到 API Key。请在 Streamlit 网站后台的 Secrets 中配置 GEMINI_API_KEY。")
-    API_KEY = "" # 暂时留空
-
-# --- 2. 页面设置 ---
+# --- 1. 页面配置 (必须在最前面) ---
 st.set_page_config(
     page_title="Nuclear Knowledge Hub", 
     layout="wide", 
@@ -22,16 +12,29 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- CSS 样式优化：适配深色模式 & Tab样式 ---
+# --- 2. 获取 API Key (双重保险模式) ---
+try:
+    if "GEMINI_API_KEY" in st.secrets:
+        API_KEY = st.secrets["GEMINI_API_KEY"]
+    else:
+        API_KEY = ""
+except FileNotFoundError:
+    API_KEY = ""
+
+if not API_KEY:
+    with st.sidebar:
+        st.divider()
+        st.warning("🔒 未检测到配置文件的 API Key")
+        API_KEY = st.text_input("请在此临时粘贴 API Key:", type="password", help="建议在 Streamlit Secrets 中配置 GEMINI_API_KEY 以免去每次输入的麻烦。")
+
+# --- 3. CSS 样式优化 ---
 st.markdown("""
     <style>
         .block-container {padding-top: 1.5rem;}
         #MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
         
-        /* -----------------------
-           通用深色模式适配
-           ----------------------- */
+        /* 通用深色模式适配 */
         .check-card {
             border: 1px solid #464b59;
             border-radius: 8px;
@@ -50,6 +53,18 @@ st.markdown("""
             margin-bottom: 1rem;
             background-color: #2d3748; 
             color: #e2e8f0;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        
+        /* 新增：学术综述卡片样式 */
+        .overview-card {
+            border: 1px solid #5a4b81; 
+            border-left: 5px solid #9f7aea; /* 紫色系 */
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            background-color: #322659; /* 深紫色背景 */
+            color: #e9d8fd;
             box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
 
@@ -83,11 +98,9 @@ st.markdown("""
             border-color: #fc8181;
         }
 
-        /* 证据容器样式 (优化版) 
-           改为浅色背景 + 深色文字，确保在白底背景下也能清晰阅读
-        */
+        /* 证据容器样式 (浅色背景 + 深色文字) */
         .evidence-container {
-            background-color: #f8f9fa; /* 浅灰偏白背景 */
+            background-color: #f8f9fa; 
             border-radius: 6px;
             padding: 15px;
             margin-top: 12px;
@@ -98,7 +111,7 @@ st.markdown("""
             border-left: 3px solid #63b3ed;
             padding-left: 10px;
             margin-bottom: 8px;
-            color: #1f2937; /* 深灰/黑色文字，高对比度 */
+            color: #1f2937; 
             font-size: 0.95em;
             font-family: "Noto Serif SC", serif;
             line-height: 1.5;
@@ -111,14 +124,14 @@ st.markdown("""
             font-size: 0.75em;
             font-weight: bold;
             margin-right: 5px;
-            background-color: #e2e8f0; /* 浅色胶囊背景 */
-            color: #2d3748; /* 深色胶囊文字 */
+            background-color: #e2e8f0; 
+            color: #2d3748; 
             border: 1px solid #cbd5e0;
         }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. 自动寻找可用模型函数 ---
+# --- 4. 自动寻找可用模型函数 ---
 def get_available_model(api_key):
     if not api_key: return None, "API Key 未配置"
     url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
@@ -158,27 +171,45 @@ def get_available_model(api_key):
     except Exception as e:
         return None, str(e)
 
-# --- 4. 辅助函数：解析 AI 返回的 JSON ---
+# --- 5. 辅助函数：解析 AI 返回的 JSON ---
 def parse_json_response(text):
+    """
+    增强版解析器：支持解析 列表[] 和 对象{}
+    """
     try:
+        # 清理 Markdown 标记
         text = re.sub(r'```json\s*', '', text)
         text = re.sub(r'```\s*$', '', text)
-        start = text.find('[')
-        end = text.rfind(']') + 1
-        if start != -1 and end != -1:
-            json_str = text[start:end]
-            return json.loads(json_str)
-        return None
+        text = text.strip()
+        
+        # 尝试直接解析
+        return json.loads(text)
     except Exception:
-        return None
+        # 如果直接解析失败，尝试提取 {} 或 [] 区间
+        try:
+            # 找最外层的括号
+            start_obj = text.find('{')
+            start_list = text.find('[')
+            
+            if start_obj != -1 and (start_list == -1 or start_obj < start_list):
+                # 这是一个对象
+                end = text.rfind('}') + 1
+                return json.loads(text[start_obj:end])
+            elif start_list != -1:
+                # 这是一个列表
+                end = text.rfind(']') + 1
+                return json.loads(text[start_list:end])
+            return None
+        except:
+            return None
 
-# --- 5. 核心页面逻辑 ---
+# --- 6. 核心页面逻辑 ---
 # 侧边栏
 with st.sidebar:
     st.title("⚛️ Nuclear Hub")
     st.info(
         """
-        **版本**: Pro Max v2.1
+        **版本**: Pro Max v2.3
         
         本平台集成了 Google Gemini 2.5 Flash 模型，
         具备实时联网核查与深度学术检索能力。
@@ -207,7 +238,7 @@ with tab1:
         st.markdown("#### 📊 核查报告")
         if check_btn and user_text_check:
             if not API_KEY:
-                st.error("🔒 API Key 未配置！请在 Streamlit 网站的 Secrets 中填入 Key，而不是填在代码里。")
+                st.error("🔒 请在侧边栏输入 API Key，或者在 Secrets 中配置。")
             else:
                 status_box = st.status("正在启动核查引擎...", expanded=True)
                 
@@ -221,6 +252,7 @@ with tab1:
                     if not model_name.startswith("models/"): model_name = f"models/{model_name}"
                     api_url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
                     
+                    # --- 核查 Prompt (已更新：强制翻译证据) ---
                     prompt_check = f"""
                     你是一个严谨的核聚变与等离子体物理专家，同时拥有实时联网核查的能力。
                     请利用 Google Search 工具，核查以下文本中的每一个事实陈述。
@@ -230,7 +262,10 @@ with tab1:
 
                     **重要指示：**
                     1. **多源数据对比**：如果不同权威机构的数据不一致（例如 IAEA 数据 vs 中国核能行业协会数据），**请不要只给出一个数字**，而必须将各方数据分别列出。
-                    2. **原文引用**：对于每一个数据点，必须引用查找资料的原话。
+                    2. **原文引用 (双语)**：
+                       - 对于每一个数据点，必须引用查找资料的原话。
+                       - **关键要求**：如果引用的原文是英文，**必须**在后面附带中文翻译。
+                       - 格式示例："The reactor has... (译文: 该反应堆拥有...)"。
                     3. **实时性**：以搜索到的最新官方报告为准。
 
                     请输出一个纯 JSON 列表。每个对象结构如下：
@@ -241,7 +276,7 @@ with tab1:
                         "evidence_list": [
                             {{
                                 "source_name": "机构名称",
-                                "content": "具体描述/数据",
+                                "content": "具体描述/数据 (如果是英文请附带中文翻译)",
                                 "url": "来源链接"
                             }}
                         ]
@@ -351,7 +386,7 @@ with tab2:
         st.markdown("#### 📚 检索结果")
         if search_btn and search_query:
             if not API_KEY:
-                st.error("🔒 API Key 未配置！请在 Streamlit 网站的 Secrets 中填入 Key。")
+                st.error("🔒 请在侧边栏输入 API Key，或者在 Secrets 中配置。")
             else:
                 status_box_search = st.status("正在进行深度学术检索...", expanded=True)
                 
@@ -360,32 +395,40 @@ with tab2:
                     if not model_name.startswith("models/"): model_name = f"models/{model_name}"
                     api_url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
                     
+                    # --- 学术检索 Prompt (已更新：包含Overview和双语摘要) ---
                     prompt_search = f"""
                     你是一位资深的核科学研究员。请利用 Google Search 为用户寻找**真实存在**的学术文献。
                     
                     **用户课题：** "{search_query}"
                     
+                    **任务 (两部分)：**
+                    1. **Overview (综述)**: 基于搜索到的所有文献，用中文写一段 150 字左右的学术综述，总结该领域的最新进展或回答用户问题。
+                    2. **Papers (文献列表)**: 列出具体的文献。
+                    
                     **严厉禁止 (Anti-Hallucination)：**
                     1. **严禁编造**论文标题、作者、期刊或链接。
-                    2. **严禁拼凑**不同来源的信息。
-                    3. 如果搜索结果中没有提供PDF链接或DOI，**请留空**。
+                    2. 如果没有PDF链接或DOI，请留空。
                     
                     **执行步骤：**
-                    1. 使用 Google Search 搜索相关的高质量学术来源（Nature, Science, IAEA, ITER, PRL等）。
-                    2. 从搜索结果的 Snippets 中**提取**文献信息。
-                    3. **链接(url)** 必须直接来自搜索结果中的真实网址，确保可访问。
+                    1. 搜索 Nature, Science, IAEA, ITER, PRL 等来源。
+                    2. 提取信息，确保链接真实。
+                    3. 编写综述。
                     
                     **输出格式：**
-                    请输出一个纯 JSON 列表。
-                    每个对象结构如下：
+                    请输出一个包含两个字段的纯 JSON 对象：
                     {{
-                        "title": "标题 (必须完全匹配搜索结果，如果是英文，请在括号内附上中文翻译)",
-                        "authors": "作者/机构 (仅提取搜索结果中显示的)",
-                        "publication": "来源 (如 Nature, IAEA)",
-                        "year": "年份",
-                        "summary": "基于搜索摘要的详细简述 (请保留英文原文，并在后面附带中文翻译)",
-                        "doi": "仅在搜索结果中明确看到DOI时填写，否则为空字符串",
-                        "url": "搜索结果对应的真实URL"
+                        "overview": "这里写中文综述，总结研究现状...",
+                        "papers": [
+                            {{
+                                "title": "标题 (必须完全匹配搜索结果，如果是英文，请在括号内附上中文翻译)",
+                                "authors": "作者/机构",
+                                "publication": "来源 (如 Nature, IAEA)",
+                                "year": "年份",
+                                "summary": "详细摘要 (请保留英文原文，并在后面附带中文翻译)",
+                                "doi": "DOI或空字符串",
+                                "url": "真实URL"
+                            }}
+                        ]
                     }}
                     """
                     
@@ -410,35 +453,63 @@ with tab2:
                                 status_box_search.update(label="检索完成", state="complete", expanded=False)
                                 
                                 if search_results:
-                                    st.success(f"检索到 {len(search_results)} 篇相关高价值文献")
+                                    # 处理两种可能的数据结构：旧版(List) 和 新版(Dict)
+                                    papers = []
+                                    overview = ""
                                     
-                                    for item in search_results:
-                                        title = item.get('title', '未知标题')
-                                        doi = item.get('doi', '')
-                                        url = item.get('url', '#')
-                                        
+                                    if isinstance(search_results, dict):
+                                        papers = search_results.get('papers', [])
+                                        overview = search_results.get('overview', "")
+                                    elif isinstance(search_results, list):
+                                        papers = search_results
+                                    
+                                    # --- 1. 展示学术综述 (Overview) ---
+                                    if overview:
                                         with st.container():
                                             st.markdown(f"""
-                                            <div class="research-card">
-                                                <div style="font-size: 1.2em; font-weight: bold; color: #63b3ed; margin-bottom: 5px;">
-                                                    📄 {title}
+                                            <div class="overview-card">
+                                                <div style="font-size: 1.2em; font-weight: bold; margin-bottom: 10px;">
+                                                    🧪 学术综述 (Overview)
                                                 </div>
-                                                <div style="font-size: 0.9em; color: #a0aec0; margin-bottom: 15px;">
-                                                    <span style="color: #e2e8f0;">{item.get('authors', '未知作者')}</span> | 
-                                                    <span style="font-style: italic;">{item.get('publication', '未知来源')}</span>, {item.get('year', 'N/A')}
+                                                <div style="line-height: 1.6; font-size: 1.0em;">
+                                                    {overview}
                                                 </div>
-                                                <div style="border-top: 1px solid #4a5568; margin-bottom: 10px;"></div>
-                                                <div style="line-height: 1.6; color: #cbd5e0; font-family: 'Noto Serif SC', serif;">
-                                                    {item.get('summary', '暂无摘要')}
-                                                </div>
+                                            </div>
                                             """, unsafe_allow_html=True)
+
+                                    # --- 2. 展示文献列表 ---
+                                    if papers:
+                                        st.success(f"检索到 {len(papers)} 篇相关高价值文献")
+                                        
+                                        for item in papers:
+                                            title = item.get('title', '未知标题')
+                                            doi = item.get('doi', '')
+                                            url = item.get('url', '#')
                                             
-                                            col_links = st.columns([1, 1, 4])
-                                            st.markdown(f'<a href="{url}" target="_blank" class="source-link">🔗 原文/Abstract</a>', unsafe_allow_html=True)
-                                            if doi and len(doi) > 5:
-                                                scihub_url = f"https://x.sci-hub.org.cn/{doi}"
-                                                st.markdown(f'<a href="{scihub_url}" target="_blank" class="source-link scihub-btn">🔓 Sci-Hub 下载</a>', unsafe_allow_html=True)
-                                            st.markdown("</div>", unsafe_allow_html=True)
+                                            with st.container():
+                                                st.markdown(f"""
+                                                <div class="research-card">
+                                                    <div style="font-size: 1.2em; font-weight: bold; color: #63b3ed; margin-bottom: 5px;">
+                                                        📄 {title}
+                                                    </div>
+                                                    <div style="font-size: 0.9em; color: #a0aec0; margin-bottom: 15px;">
+                                                        <span style="color: #e2e8f0;">{item.get('authors', '未知作者')}</span> | 
+                                                        <span style="font-style: italic;">{item.get('publication', '未知来源')}</span>, {item.get('year', 'N/A')}
+                                                    </div>
+                                                    <div style="border-top: 1px solid #4a5568; margin-bottom: 10px;"></div>
+                                                    <div style="line-height: 1.6; color: #cbd5e0; font-family: 'Noto Serif SC', serif;">
+                                                        {item.get('summary', '暂无摘要')}
+                                                    </div>
+                                                """, unsafe_allow_html=True)
+                                                
+                                                col_links = st.columns([1, 1, 4])
+                                                st.markdown(f'<a href="{url}" target="_blank" class="source-link">🔗 原文/Abstract</a>', unsafe_allow_html=True)
+                                                if doi and len(doi) > 5:
+                                                    scihub_url = f"https://x.sci-hub.org.cn/{doi}"
+                                                    st.markdown(f'<a href="{scihub_url}" target="_blank" class="source-link scihub-btn">🔓 Sci-Hub 下载</a>', unsafe_allow_html=True)
+                                                st.markdown("</div>", unsafe_allow_html=True)
+                                    else:
+                                        st.warning("未找到具体的文献列表，但已生成综述。")
                                 else:
                                     st.warning("未能解析搜索结果")
                                     st.markdown(raw_content)
