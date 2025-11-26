@@ -12,7 +12,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 2. 获取 API Key ---
+# --- 2. 获取 API Key (双重保险模式) ---
 try:
     if "GEMINI_API_KEY" in st.secrets:
         API_KEY = st.secrets["GEMINI_API_KEY"]
@@ -25,15 +25,16 @@ if not API_KEY:
     with st.sidebar:
         st.divider()
         st.warning("🔒 未检测到配置文件的 API Key")
-        API_KEY = st.text_input("请在此临时粘贴 API Key:", type="password", help="建议在 Streamlit Secrets 中配置 GEMINI_API_KEY。")
+        API_KEY = st.text_input("请在此临时粘贴 API Key:", type="password", help="建议在 Streamlit Secrets 中配置 GEMINI_API_KEY 以免去每次输入的麻烦。")
 
-# --- 3. CSS 样式 ---
+# --- 3. CSS 样式优化 ---
 st.markdown("""
     <style>
         .block-container {padding-top: 1.5rem;}
         #MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
         
+        /* 通用深色模式适配 */
         .check-card {
             border: 1px solid #464b59;
             border-radius: 8px;
@@ -55,13 +56,14 @@ st.markdown("""
             box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
         
+        /* 新增：学术综述卡片样式 */
         .overview-card {
             border: 1px solid #5a4b81; 
-            border-left: 5px solid #9f7aea;
+            border-left: 5px solid #9f7aea; /* 紫色系 */
             border-radius: 8px;
             padding: 1.5rem;
             margin-bottom: 1.5rem;
-            background-color: #322659;
+            background-color: #322659; /* 深紫色背景 */
             color: #e9d8fd;
             box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
@@ -96,6 +98,7 @@ st.markdown("""
             border-color: #fc8181;
         }
 
+        /* 证据容器样式 (浅色背景 + 深色文字) */
         .evidence-container {
             background-color: #f8f9fa; 
             border-radius: 6px;
@@ -128,7 +131,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 4. 自动寻找可用模型 ---
+# --- 4. 自动寻找可用模型函数 ---
 def get_available_model(api_key):
     if not api_key: return None, "API Key 未配置"
     url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
@@ -144,6 +147,7 @@ def get_available_model(api_key):
         
         if not model_names: return None, "未找到任何可用模型"
 
+        # 优先级匹配逻辑
         preferred_order = [
             'gemini-2.5-flash',
             'gemini-1.5-flash',
@@ -167,58 +171,78 @@ def get_available_model(api_key):
     except Exception as e:
         return None, str(e)
 
-# --- 5. JSON 解析函数 ---
+# --- 5. 辅助函数：解析 AI 返回的 JSON ---
 def parse_json_response(text):
+    """
+    增强版解析器：支持解析 列表[] 和 对象{}
+    """
     try:
+        # 清理 Markdown 标记
         text = re.sub(r'```json\s*', '', text)
         text = re.sub(r'```\s*$', '', text)
         text = text.strip()
         
+        # 尝试直接解析
         return json.loads(text)
     except Exception:
+        # 如果直接解析失败，尝试提取 {} 或 [] 区间
         try:
+            # 找最外层的括号
             start_obj = text.find('{')
             start_list = text.find('[')
             
             if start_obj != -1 and (start_list == -1 or start_obj < start_list):
+                # 这是一个对象
                 end = text.rfind('}') + 1
                 return json.loads(text[start_obj:end])
             elif start_list != -1:
+                # 这是一个列表
                 end = text.rfind(']') + 1
                 return json.loads(text[start_list:end])
             return None
         except:
             return None
 
-# --- 6. 主逻辑 ---
+# --- 6. 核心页面逻辑 ---
+# 侧边栏
 with st.sidebar:
     st.title("⚛️ Nuclear Hub")
-    st.info("**版本**: Pro Max v2.5 (Original + Trans)")
+    st.info(
+        """
+        **版本**: Pro Max v2.3
+        
+        本平台集成了 Google Gemini 2.5 Flash 模型，
+        具备实时联网核查与深度学术检索能力。
+        """
+    )
     st.caption("Powered by Google Gemini & Streamlit")
 
 st.title("Nuclear Knowledge Hub")
 st.caption("🚀 核科学事实核查与学术检索平台")
 
+# 创建两个独立的 Tabs
 tab1, tab2 = st.tabs(["🔍智能核查 (Check)", "🔬学术检索 (Search)"])
 
 # ==========================================
-# 模块一：智能核查
+# 模块一：智能核查 (Nuclear Check)
 # ==========================================
 with tab1:
     col1_check, col2_check = st.columns([1, 1], gap="large")
 
     with col1_check:
         st.markdown("#### 📝 输入待核查内容")
-        user_text_check = st.text_area("待核查文本", height=400, label_visibility="collapsed", placeholder="例如：中国现在有58座核电站？", key="input_check")
+        user_text_check = st.text_area("待核查文本", height=400, label_visibility="collapsed", placeholder="在此粘贴待核实信息...\n例如：中国现在有58座核电站？", key="input_check")
         check_btn = st.button("🚀 开始深度核查", type="primary", use_container_width=True, key="btn_check")
 
     with col2_check:
         st.markdown("#### 📊 核查报告")
         if check_btn and user_text_check:
             if not API_KEY:
-                st.error("🔒 请在侧边栏输入 API Key")
+                st.error("🔒 请在侧边栏输入 API Key，或者在 Secrets 中配置。")
             else:
                 status_box = st.status("正在启动核查引擎...", expanded=True)
+                
+                status_box.write("正在连接 Google Gemini 节点...")
                 model_name, msg = get_available_model(API_KEY)
                 
                 if not model_name:
@@ -228,33 +252,35 @@ with tab1:
                     if not model_name.startswith("models/"): model_name = f"models/{model_name}"
                     api_url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
                     
+                    # --- 核查 Prompt (已更新：强制翻译证据) ---
                     prompt_check = f"""
-                    你是一个严谨的核聚变与等离子体物理专家。请利用 Google Search 工具核查以下文本。
+                    你是一个严谨的核聚变与等离子体物理专家，同时拥有实时联网核查的能力。
+                    请利用 Google Search 工具，核查以下文本中的每一个事实陈述。
 
-                    **文本：** '''{user_text_check}'''
+                    **用户输入文本：**
+                    '''{user_text_check}'''
 
-                    **关键要求：**
-                    1. **多源数据**：如果数据冲突（如 IAEA vs 官方），必须列出各方数据。
-                    2. **强制翻译引用**：
-                       - 必须引用查找资料的原话。
-                       - **如果原文是英文，必须在后面紧跟中文翻译**。
-                       - 格式："...English text... (译文: ...中文...)"
+                    **重要指示：**
+                    1. **多源数据对比**：如果不同权威机构的数据不一致（例如 IAEA 数据 vs 中国核能行业协会数据），**请不要只给出一个数字**，而必须将各方数据分别列出。
+                    2. **原文引用 (双语)**：
+                       - 对于每一个数据点，必须引用查找资料的原话。
+                       - **关键要求**：如果引用的原文是英文，**必须**在后面附带中文翻译。
+                       - 格式示例："The reactor has... (译文: 该反应堆拥有...)"。
+                    3. **实时性**：以搜索到的最新官方报告为准。
 
-                    **输出格式 (JSON List):**
-                    [
-                        {{
-                            "claim": "原文陈述",
-                            "status": "正确/错误/存疑/数据不一致",
-                            "correction": "综合分析",
-                            "evidence_list": [
-                                {{
-                                    "source_name": "机构名",
-                                    "content": "原文证据 (若为英文需附翻译)",
-                                    "url": "链接"
-                                }}
-                            ]
-                        }}
-                    ]
+                    请输出一个纯 JSON 列表。每个对象结构如下：
+                    {{
+                        "claim": "原文中的陈述",
+                        "status": "正确/错误/存疑/数据不一致",
+                        "correction": "综合分析。如果数据冲突，请在此说明差异原因。",
+                        "evidence_list": [
+                            {{
+                                "source_name": "机构名称",
+                                "content": "具体描述/数据 (如果是英文请附带中文翻译)",
+                                "url": "来源链接"
+                            }}
+                        ]
+                    }}
                     """
                     
                     payload = {
@@ -262,7 +288,7 @@ with tab1:
                         "tools": [{"google_search": {}}]
                     }
                     
-                    status_box.write("🔍 正在联网检索...")
+                    status_box.write("🔍 正在联网检索最新数据...")
                     
                     try:
                         response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload)
@@ -271,14 +297,17 @@ with tab1:
                             result = response.json()
                             try:
                                 candidates = result.get('candidates', [])
+                                if not candidates: raise ValueError("无候选项")
                                 content_parts = candidates[0].get('content', {}).get('parts', [])
                                 raw_content = content_parts[0].get('text', "") if content_parts else ""
+                                
                                 check_results = parse_json_response(raw_content)
                                 
-                                status_box.update(label="核查完成", state="complete", expanded=False)
+                                status_box.update(label="深度核查完成", state="complete", expanded=False)
                                 
                                 if check_results:
-                                    st.success(f"核查完成！")
+                                    st.success(f"核查完成！已比对多方权威数据源")
+                                    
                                     for item in check_results:
                                         status = item.get('status', '存疑')
                                         if "错" in status:
@@ -328,32 +357,36 @@ with tab1:
                                                     """, unsafe_allow_html=True)
                                                 st.markdown('</div>', unsafe_allow_html=True)
                                             st.markdown("</div>", unsafe_allow_html=True)
+
                                 else:
-                                    st.warning("解析失败")
+                                    st.warning("AI 返回的内容无法解析")
                                     st.markdown(raw_content)
+
                             except Exception as e:
+                                status_box.update(label="解析失败", state="error")
                                 st.error(f"解析错误: {e}")
                         else:
                             st.error(f"API 请求失败: {response.status_code}")
                     except Exception as e:
-                        st.error(f"网络错误: {e}")
+                        st.error(f"网络连接错误: {e}")
 
 # ==========================================
-# 模块二：学术检索 (重点修复链接与翻译)
+# 模块二：学术检索 (Nuclear Search)
 # ==========================================
 with tab2:
     col1_search, col2_search = st.columns([1, 1], gap="large")
     
     with col1_search:
         st.markdown("#### 🔍 学术搜索引擎")
-        search_query = st.text_input("请输入研究课题", label_visibility="collapsed", placeholder="例如：可控核聚变 2024年 突破性进展 Q值", key="input_search")
+        search_query = st.text_input("请输入研究课题、关键词或问题", label_visibility="collapsed", placeholder="例如：可控核聚变 2024年 突破性进展 Q值", key="input_search")
+        st.caption("支持中英文输入。系统将自动检索数据库。")
         search_btn = st.button("🔬 开始学术检索", type="primary", use_container_width=True, key="btn_search")
 
     with col2_search:
         st.markdown("#### 📚 检索结果")
         if search_btn and search_query:
             if not API_KEY:
-                st.error("🔒 请输入 API Key")
+                st.error("🔒 请在侧边栏输入 API Key，或者在 Secrets 中配置。")
             else:
                 status_box_search = st.status("正在进行深度学术检索...", expanded=True)
                 
@@ -362,36 +395,38 @@ with tab2:
                     if not model_name.startswith("models/"): model_name = f"models/{model_name}"
                     api_url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
                     
-                    # --- 核心修改：双语对照 + 严格链接 ---
+                    # --- 学术检索 Prompt (已更新：包含Overview和双语摘要) ---
                     prompt_search = f"""
-                    你是一位核科学研究员。请利用 Google Search 寻找真实文献。
+                    你是一位资深的核科学研究员。请利用 Google Search 为用户寻找**真实存在**的学术文献。
                     
                     **用户课题：** "{search_query}"
                     
-                    **严格指令 (Anti-Hallucination & Bilingual):**
-                    1. **链接真实性校验 (URL Accuracy)**：
-                       - **必须使用** Google Search 搜索结果 Snippet 中提供的真实 URL。
-                       - **严禁** 自己编造链接（例如不要猜测 .pdf 链接）。
-                       - 如果搜索结果没有直接的论文链接，请使用该结果指向的新闻或摘要页面的 URL。
+                    **任务 (两部分)：**
+                    1. **Overview (综述)**: 基于搜索到的所有文献，用中文写一段 150 字左右的学术综述，总结该领域的最新进展或回答用户问题。
+                    2. **Papers (文献列表)**: 列出具体的文献。
                     
-                    2. **双语内容 (Bilingual Content)**：
-                       - JSON 必须包含英文原文（`title`, `summary`）**和** 中文翻译（`title_zh`, `summary_zh`）。
-                       - 英文部分保持原汁原味，中文部分提供高质量翻译。
-
-                    **输出格式 (JSON Object):**
+                    **严厉禁止 (Anti-Hallucination)：**
+                    1. **严禁编造**论文标题、作者、期刊或链接。
+                    2. 如果没有PDF链接或DOI，请留空。
+                    
+                    **执行步骤：**
+                    1. 搜索 Nature, Science, IAEA, ITER, PRL 等来源。
+                    2. 提取信息，确保链接真实。
+                    3. 编写综述。
+                    
+                    **输出格式：**
+                    请输出一个包含两个字段的纯 JSON 对象：
                     {{
-                        "overview": "150字左右的中文综述，总结该领域的最新进展...",
+                        "overview": "这里写中文综述，总结研究现状...",
                         "papers": [
                             {{
-                                "title": "Original English Title from search result",
-                                "title_zh": "中文翻译标题",
-                                "authors": "Author/Institution",
-                                "publication": "Source (e.g. Nature)",
-                                "year": "Year",
-                                "summary": "Original English snippet/summary from search",
-                                "summary_zh": "中文翻译摘要",
-                                "doi": "DOI or empty string",
-                                "url": "MUST be the EXACT URL from the search snippet"
+                                "title": "标题 (必须完全匹配搜索结果，如果是英文，请在括号内附上中文翻译)",
+                                "authors": "作者/机构",
+                                "publication": "来源 (如 Nature, IAEA)",
+                                "year": "年份",
+                                "summary": "详细摘要 (请保留英文原文，并在后面附带中文翻译)",
+                                "doi": "DOI或空字符串",
+                                "url": "真实URL"
                             }}
                         ]
                     }}
@@ -402,7 +437,7 @@ with tab2:
                         "tools": [{"google_search": {}}]
                     }
                     
-                    status_box_search.write("🔍 正在检索并校验链接有效性...")
+                    status_box_search.write("🔍 正在连接 Google Scholar & 权威期刊库...")
                     
                     try:
                         response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload)
@@ -412,20 +447,23 @@ with tab2:
                                 candidates = result.get('candidates', [])
                                 content_parts = candidates[0].get('content', {}).get('parts', [])
                                 raw_content = content_parts[0].get('text', "") if content_parts else ""
+                                
                                 search_results = parse_json_response(raw_content)
                                 
                                 status_box_search.update(label="检索完成", state="complete", expanded=False)
                                 
                                 if search_results:
+                                    # 处理两种可能的数据结构：旧版(List) 和 新版(Dict)
                                     papers = []
                                     overview = ""
+                                    
                                     if isinstance(search_results, dict):
                                         papers = search_results.get('papers', [])
                                         overview = search_results.get('overview', "")
                                     elif isinstance(search_results, list):
                                         papers = search_results
                                     
-                                    # 1. 综述
+                                    # --- 1. 展示学术综述 (Overview) ---
                                     if overview:
                                         with st.container():
                                             st.markdown(f"""
@@ -439,35 +477,20 @@ with tab2:
                                             </div>
                                             """, unsafe_allow_html=True)
 
-                                    # 2. 文献列表
+                                    # --- 2. 展示文献列表 ---
                                     if papers:
                                         st.success(f"检索到 {len(papers)} 篇相关高价值文献")
+                                        
                                         for item in papers:
-                                            # 提取字段
-                                            title = item.get('title', 'Unknown Title')
-                                            title_zh = item.get('title_zh', '')
-                                            summary = item.get('summary', 'No summary available.')
-                                            summary_zh = item.get('summary_zh', '')
-                                            
-                                            # 构建显示HTML
-                                            # 标题部分：英文 + 中文
-                                            display_title = title
-                                            if title_zh:
-                                                display_title = f"{title}<br><span style='font-size:0.8em; color:#a0aec0; font-weight:normal'>{title_zh}</span>"
-                                            
-                                            # 摘要部分：英文 + 中文
-                                            display_summary = summary
-                                            if summary_zh:
-                                                display_summary = f"{summary}<br><br><span style='color:#90cdf4;'>[译] {summary_zh}</span>"
-
+                                            title = item.get('title', '未知标题')
                                             doi = item.get('doi', '')
                                             url = item.get('url', '#')
                                             
                                             with st.container():
                                                 st.markdown(f"""
                                                 <div class="research-card">
-                                                    <div style="font-size: 1.2em; font-weight: bold; color: #63b3ed; margin-bottom: 5px; line-height: 1.4;">
-                                                        📄 {display_title}
+                                                    <div style="font-size: 1.2em; font-weight: bold; color: #63b3ed; margin-bottom: 5px;">
+                                                        📄 {title}
                                                     </div>
                                                     <div style="font-size: 0.9em; color: #a0aec0; margin-bottom: 15px;">
                                                         <span style="color: #e2e8f0;">{item.get('authors', '未知作者')}</span> | 
@@ -475,20 +498,20 @@ with tab2:
                                                     </div>
                                                     <div style="border-top: 1px solid #4a5568; margin-bottom: 10px;"></div>
                                                     <div style="line-height: 1.6; color: #cbd5e0; font-family: 'Noto Serif SC', serif;">
-                                                        {display_summary}
+                                                        {item.get('summary', '暂无摘要')}
                                                     </div>
                                                 """, unsafe_allow_html=True)
                                                 
                                                 col_links = st.columns([1, 1, 4])
-                                                st.markdown(f'<a href="{url}" target="_blank" class="source-link">🔗 原文链接/Source</a>', unsafe_allow_html=True)
+                                                st.markdown(f'<a href="{url}" target="_blank" class="source-link">🔗 原文/Abstract</a>', unsafe_allow_html=True)
                                                 if doi and len(doi) > 5:
                                                     scihub_url = f"https://x.sci-hub.org.cn/{doi}"
                                                     st.markdown(f'<a href="{scihub_url}" target="_blank" class="source-link scihub-btn">🔓 Sci-Hub 下载</a>', unsafe_allow_html=True)
                                                 st.markdown("</div>", unsafe_allow_html=True)
                                     else:
-                                        st.warning("未找到具体的文献列表。")
+                                        st.warning("未找到具体的文献列表，但已生成综述。")
                                 else:
-                                    st.warning("解析失败")
+                                    st.warning("未能解析搜索结果")
                                     st.markdown(raw_content)
                             except Exception as e:
                                 st.error(f"解析错误: {e}")
