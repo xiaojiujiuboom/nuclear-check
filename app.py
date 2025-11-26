@@ -203,7 +203,7 @@ def parse_json_response(text):
 # --- 6. 主逻辑 ---
 with st.sidebar:
     st.title("⚛️ Nuclear Hub")
-    st.info("**版本**: Pro Max v2.8 (Deep Link Focus)")
+    st.info("**版本**: Pro Max v2.9 (Original Direct Links)")
     st.caption("Powered by Google Gemini & Streamlit")
 
 st.title("Nuclear Knowledge Hub")
@@ -245,11 +245,11 @@ with tab1:
                     **文本：** '''{user_text_check}'''
 
                     **关键要求 (Critical Requirements)：**
-                    1. **链接精准度 (DEEP LINKS ONLY)**：
-                       - `url` 字段必须是**具体的文章、报告或新闻页面的链接**。
-                       - **严禁**使用官网主页/根域名（例如：禁止只给 `www.iaea.org`，必须是 `www.iaea.org/sites/.../report.pdf` 或具体的 HTML 页面）。
-                       - **严禁**使用 `google.com/grounding-api-redirect` 链接。
-                       - 务必从搜索结果中复制**完整**的长链接。
+                    1. **链接精准度 (Direct Original Links Only)**：
+                       - **必须提供数据来源的原始网页链接**。
+                       - 仔细检查链接：不要使用 google 的跳转链接 (grounding-api-redirect)，请找到该跳转指向的**真实目标网址** (Target URL)。
+                       - 如果搜索结果显示的是 PDF，请尽量提供 PDF 的直接链接。
+                       - **不要**为了填空而填官网主页。必须是具体内容的页面。
                     
                     2. **双语引用 (Bilingual Quote)**：
                        - **如果原文是英文，必须在后面紧跟中文翻译**。
@@ -264,9 +264,8 @@ with tab1:
                             "evidence_list": [
                                 {{
                                     "source_name": "机构名",
-                                    "source_title": "具体的文章标题",
                                     "content": "原文证据 (若为英文需附翻译)",
-                                    "url": "具体的深层URL (不要给主页)"
+                                    "url": "原始文章页面的真实URL"
                                 }}
                             ]
                         }}
@@ -278,7 +277,7 @@ with tab1:
                         "tools": [{"google_search": {}}]
                     }
                     
-                    status_box.write("🔍 正在联网检索 (过滤无效链接)...")
+                    status_box.write("🔍 正在联网检索 (寻找原始出处)...")
                     
                     try:
                         response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload)
@@ -324,6 +323,7 @@ with tab1:
                                             """, unsafe_allow_html=True)
                                             
                                             evidence_list = item.get('evidence_list', [])
+                                            # 兼容旧格式
                                             if not evidence_list and 'evidence_quote' in item:
                                                 evidence_list = [{'source_name': '权威数据', 'content': item['evidence_quote'], 'url': '#'}]
 
@@ -333,22 +333,11 @@ with tab1:
                                                 
                                                 for ev in evidence_list:
                                                     source_name = ev.get('source_name', '来源')
-                                                    source_title = ev.get('source_title', '')
                                                     content = ev.get('content', '')
                                                     url = ev.get('url', '#')
                                                     
-                                                    # 链接清洗
-                                                    if not url or "grounding-api-redirect" in url or url == '#':
-                                                        # 如果 AI 给不出有效链接，构造精准搜索
-                                                        search_text = f"{source_name} {source_title}" if source_title else f"{source_name} {content[:20]}"
-                                                        url = f"https://www.google.com/search?q={urllib.parse.quote(search_text)}"
-                                                        link_text = "🔍 智能搜索来源 (Google)"
-                                                    else:
-                                                        # 简单判断：如果是根域名，提示可能不准
-                                                        if url.count('/') <= 3: 
-                                                            link_text = "🔗 官网主页 (未找到深层链接)"
-                                                        else:
-                                                            link_text = "🔗 查看原文"
+                                                    # 恢复为直接展示原链接
+                                                    link_text = "🔗 来源链接"
 
                                                     st.markdown(f"""
                                                     <div class="quote-item">
@@ -409,6 +398,7 @@ with tab2:
                     1. **URL必须是深层链接 (DEEP LINK REQUIRED)**：
                        - **严禁**提供期刊首页 (如 www.nature.com)。
                        - **必须**提供具体文章页 (如 www.nature.com/articles/...)。
+                       - **严禁**使用 `google.com/grounding-api-redirect`。
                        - 如果找不到直接链接，不要编造，留空即可。
                     
                     2. **双语内容 (Bilingual)**：
