@@ -96,16 +96,15 @@ st.markdown("""
             border-color: #fc8181;
         }
         
-        /* 辅助按钮样式 (Google Search) */
+        /* 辅助按钮样式 (Google Search) - 强调色 */
         .search-btn {
-            background-color: #202124;
-            color: #bdc1c6 !important;
-            border: 1px solid #5f6368;
+            background-color: #2b6cb0; /* 蓝色背景 */
+            color: #fff !important;
+            border: 1px solid #4299e1;
         }
         .search-btn:hover {
-            background-color: #303134;
-            color: #fff !important;
-            border-color: #8ab4f8;
+            background-color: #3182ce;
+            border-color: #63b3ed;
         }
 
         .evidence-container {
@@ -204,7 +203,7 @@ def parse_json_response(text):
 # --- 6. 主逻辑 ---
 with st.sidebar:
     st.title("⚛️ Nuclear Hub")
-    st.info("**版本**: Pro Max v2.6 (Fix 404 Links)")
+    st.info("**版本**: Pro Max v2.7 (Smart Links)")
     st.caption("Powered by Google Gemini & Streamlit")
 
 st.title("Nuclear Knowledge Hub")
@@ -213,7 +212,7 @@ st.caption("🚀 核科学事实核查与学术检索平台")
 tab1, tab2 = st.tabs(["🔍智能核查 (Check)", "🔬学术检索 (Search)"])
 
 # ==========================================
-# 模块一：智能核查 (重点修复链接)
+# 模块一：智能核查 (修复链接关联性)
 # ==========================================
 with tab1:
     col1_check, col2_check = st.columns([1, 1], gap="large")
@@ -239,7 +238,7 @@ with tab1:
                     if not model_name.startswith("models/"): model_name = f"models/{model_name}"
                     api_url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
                     
-                    # 核查 Prompt：严禁 redirect 链接
+                    # 核查 Prompt：要求提取具体标题，以便我们构造搜索链接
                     prompt_check = f"""
                     你是一个严谨的核聚变与等离子体物理专家。请利用 Google Search 工具核查以下文本。
 
@@ -247,12 +246,10 @@ with tab1:
 
                     **关键要求 (Critical Requirements)：**
                     1. **链接真实性 (Real URLs Only)**：
-                       - 提取证据时，`url` 字段必须是真实的、公开的网址（如 http://iaea.org/..., http://news.cn/...）。
-                       - **绝对禁止**使用 `google.com/grounding-api-redirect/...` 这种链接，这些链接无法访问。
-                       - 如果找不到直接链接，请提供该机构官网主页链接。
+                       - 提取证据时，必须提供来源网页的**具体标题(source_title)**。
+                       - 如果找不到具体的 PDF/文章链接，请留空 `url`，不要填官网主页 (e.g. 不要填 www.iaea.org)。
                     
                     2. **双语引用 (Bilingual Quote)**：
-                       - 如果引用的原文是中文，直接引用。
                        - **如果原文是英文，必须在后面紧跟中文翻译**。
                        - 格式：`"English Original Text..." (译: 中文翻译...)`。
 
@@ -264,9 +261,10 @@ with tab1:
                             "correction": "综合分析",
                             "evidence_list": [
                                 {{
-                                    "source_name": "机构名",
+                                    "source_name": "机构名 (如 IAEA)",
+                                    "source_title": "具体的文章/报告标题 (用于精确搜索)",
                                     "content": "原文证据 (若为英文需附翻译)",
-                                    "url": "真实URL"
+                                    "url": "真实深层URL (若无则留空)"
                                 }}
                             ]
                         }}
@@ -278,7 +276,7 @@ with tab1:
                         "tools": [{"google_search": {}}]
                     }
                     
-                    status_box.write("🔍 正在联网检索 (过滤失效链接)...")
+                    status_box.write("🔍 正在联网检索 (过滤无效链接)...")
                     
                     try:
                         response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload)
@@ -334,19 +332,35 @@ with tab1:
                                                 
                                                 for ev in evidence_list:
                                                     source_name = ev.get('source_name', '来源')
+                                                    source_title = ev.get('source_title', '')
                                                     content = ev.get('content', '')
                                                     url = ev.get('url', '#')
                                                     
-                                                    # 链接清洗逻辑：如果是 redirects 或空，则替换为 Google 搜索
-                                                    is_bad_link = False
-                                                    if not url or "grounding-api-redirect" in url or url == '#':
-                                                        is_bad_link = True
-                                                        # 生成备用搜索链接
-                                                        search_q = urllib.parse.quote(f"{source_name} {content[:20]}")
-                                                        url = f"https://www.google.com/search?q={search_q}"
-                                                        link_text = "🔍 搜索来源 (Link Unavailable)"
+                                                    # --- 智能链接构造逻辑 ---
+                                                    # 1. 构造精准搜索词: 机构名 + 文章标题 (如果AI提供了) 或 内容的前20个字
+                                                    if source_title:
+                                                        search_query_text = f"{source_name} {source_title}"
                                                     else:
-                                                        link_text = "🔗 来源链接"
+                                                        search_query_text = f"{source_name} {content[:30]}"
+                                                    
+                                                    smart_search_url = f"https://www.google.com/search?q={urllib.parse.quote(search_query_text)}"
+                                                    
+                                                    # 2. 判断 URL 是否有效 (过滤 redirect, 过滤 root domain)
+                                                    is_valid_url = False
+                                                    if url and url != '#' and "grounding-api-redirect" not in url:
+                                                        # 简单判断：如果不包含路径（比如只是 www.cas.cn），认为是无效的深层链接
+                                                        if url.count('/') > 3: 
+                                                            is_valid_url = True
+
+                                                    # 3. 渲染按钮
+                                                    buttons_html = ""
+                                                    
+                                                    # 按钮 A: 智能验证 (Smart Verify) - 这是最稳的，绝对相关
+                                                    buttons_html += f'<a href="{smart_search_url}" target="_blank" class="source-link search-btn">🔍 验证来源 (Google)</a>'
+                                                    
+                                                    # 按钮 B: 直达链接 (仅当 AI 提供了看起来靠谱的长链接时显示)
+                                                    if is_valid_url:
+                                                        buttons_html += f'<a href="{url}" target="_blank" class="source-link">🔗 直达链接</a>'
 
                                                     # 渲染
                                                     st.markdown(f"""
@@ -354,7 +368,9 @@ with tab1:
                                                         <span class="tag-pill">[{source_name}]</span>
                                                         {content}
                                                         <br>
-                                                        <a href="{url}" target="_blank" class="source-link" style="margin-top:4px; display:inline-block;">{link_text}</a>
+                                                        <div style="margin-top:6px;">
+                                                            {buttons_html}
+                                                        </div>
                                                     </div>
                                                     """, unsafe_allow_html=True)
                                                 st.markdown('</div>', unsafe_allow_html=True)
@@ -537,6 +553,6 @@ with tab2:
                             except Exception as e:
                                 st.error(f"解析错误: {e}")
                         else:
-                            st.error(f"请求失败: {response.status_code}")
+                            st.error(f"API 请求失败: {response.status_code}")
                     except Exception as e:
                         st.error(f"网络错误: {e}")
