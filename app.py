@@ -203,7 +203,7 @@ def parse_json_response(text):
 # --- 6. 主逻辑 ---
 with st.sidebar:
     st.title("⚛️ Nuclear Hub")
-    st.info("**版本**: Pro Max v2.7 (Smart Links)")
+    st.info("**版本**: Pro Max v2.8 (Deep Link Focus)")
     st.caption("Powered by Google Gemini & Streamlit")
 
 st.title("Nuclear Knowledge Hub")
@@ -212,7 +212,7 @@ st.caption("🚀 核科学事实核查与学术检索平台")
 tab1, tab2 = st.tabs(["🔍智能核查 (Check)", "🔬学术检索 (Search)"])
 
 # ==========================================
-# 模块一：智能核查 (修复链接关联性)
+# 模块一：智能核查
 # ==========================================
 with tab1:
     col1_check, col2_check = st.columns([1, 1], gap="large")
@@ -238,16 +238,18 @@ with tab1:
                     if not model_name.startswith("models/"): model_name = f"models/{model_name}"
                     api_url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
                     
-                    # 核查 Prompt：要求提取具体标题，以便我们构造搜索链接
+                    # --- 核查 Prompt 升级：强制深层链接 ---
                     prompt_check = f"""
                     你是一个严谨的核聚变与等离子体物理专家。请利用 Google Search 工具核查以下文本。
 
                     **文本：** '''{user_text_check}'''
 
                     **关键要求 (Critical Requirements)：**
-                    1. **链接真实性 (Real URLs Only)**：
-                       - 提取证据时，必须提供来源网页的**具体标题(source_title)**。
-                       - 如果找不到具体的 PDF/文章链接，请留空 `url`，不要填官网主页 (e.g. 不要填 www.iaea.org)。
+                    1. **链接精准度 (DEEP LINKS ONLY)**：
+                       - `url` 字段必须是**具体的文章、报告或新闻页面的链接**。
+                       - **严禁**使用官网主页/根域名（例如：禁止只给 `www.iaea.org`，必须是 `www.iaea.org/sites/.../report.pdf` 或具体的 HTML 页面）。
+                       - **严禁**使用 `google.com/grounding-api-redirect` 链接。
+                       - 务必从搜索结果中复制**完整**的长链接。
                     
                     2. **双语引用 (Bilingual Quote)**：
                        - **如果原文是英文，必须在后面紧跟中文翻译**。
@@ -261,10 +263,10 @@ with tab1:
                             "correction": "综合分析",
                             "evidence_list": [
                                 {{
-                                    "source_name": "机构名 (如 IAEA)",
-                                    "source_title": "具体的文章/报告标题 (用于精确搜索)",
+                                    "source_name": "机构名",
+                                    "source_title": "具体的文章标题",
                                     "content": "原文证据 (若为英文需附翻译)",
-                                    "url": "真实深层URL (若无则留空)"
+                                    "url": "具体的深层URL (不要给主页)"
                                 }}
                             ]
                         }}
@@ -322,7 +324,6 @@ with tab1:
                                             """, unsafe_allow_html=True)
                                             
                                             evidence_list = item.get('evidence_list', [])
-                                            # 兼容旧格式
                                             if not evidence_list and 'evidence_quote' in item:
                                                 evidence_list = [{'source_name': '权威数据', 'content': item['evidence_quote'], 'url': '#'}]
 
@@ -336,41 +337,25 @@ with tab1:
                                                     content = ev.get('content', '')
                                                     url = ev.get('url', '#')
                                                     
-                                                    # --- 智能链接构造逻辑 ---
-                                                    # 1. 构造精准搜索词: 机构名 + 文章标题 (如果AI提供了) 或 内容的前20个字
-                                                    if source_title:
-                                                        search_query_text = f"{source_name} {source_title}"
+                                                    # 链接清洗
+                                                    if not url or "grounding-api-redirect" in url or url == '#':
+                                                        # 如果 AI 给不出有效链接，构造精准搜索
+                                                        search_text = f"{source_name} {source_title}" if source_title else f"{source_name} {content[:20]}"
+                                                        url = f"https://www.google.com/search?q={urllib.parse.quote(search_text)}"
+                                                        link_text = "🔍 智能搜索来源 (Google)"
                                                     else:
-                                                        search_query_text = f"{source_name} {content[:30]}"
-                                                    
-                                                    smart_search_url = f"https://www.google.com/search?q={urllib.parse.quote(search_query_text)}"
-                                                    
-                                                    # 2. 判断 URL 是否有效 (过滤 redirect, 过滤 root domain)
-                                                    is_valid_url = False
-                                                    if url and url != '#' and "grounding-api-redirect" not in url:
-                                                        # 简单判断：如果不包含路径（比如只是 www.cas.cn），认为是无效的深层链接
-                                                        if url.count('/') > 3: 
-                                                            is_valid_url = True
+                                                        # 简单判断：如果是根域名，提示可能不准
+                                                        if url.count('/') <= 3: 
+                                                            link_text = "🔗 官网主页 (未找到深层链接)"
+                                                        else:
+                                                            link_text = "🔗 查看原文"
 
-                                                    # 3. 渲染按钮
-                                                    buttons_html = ""
-                                                    
-                                                    # 按钮 A: 智能验证 (Smart Verify) - 这是最稳的，绝对相关
-                                                    buttons_html += f'<a href="{smart_search_url}" target="_blank" class="source-link search-btn">🔍 验证来源 (Google)</a>'
-                                                    
-                                                    # 按钮 B: 直达链接 (仅当 AI 提供了看起来靠谱的长链接时显示)
-                                                    if is_valid_url:
-                                                        buttons_html += f'<a href="{url}" target="_blank" class="source-link">🔗 直达链接</a>'
-
-                                                    # 渲染
                                                     st.markdown(f"""
                                                     <div class="quote-item">
                                                         <span class="tag-pill">[{source_name}]</span>
                                                         {content}
                                                         <br>
-                                                        <div style="margin-top:6px;">
-                                                            {buttons_html}
-                                                        </div>
+                                                        <a href="{url}" target="_blank" class="source-link" style="margin-top:4px; display:inline-block;">{link_text}</a>
                                                     </div>
                                                     """, unsafe_allow_html=True)
                                                 st.markdown('</div>', unsafe_allow_html=True)
@@ -386,7 +371,7 @@ with tab1:
                         st.error(f"网络错误: {e}")
 
 # ==========================================
-# 模块二：学术检索 (双语对照+强力搜素)
+# 模块二：学术检索 (双语对照+深层链接)
 # ==========================================
 with tab2:
     col1_search, col2_search = st.columns([1, 1], gap="large")
@@ -409,36 +394,40 @@ with tab2:
                     if not model_name.startswith("models/"): model_name = f"models/{model_name}"
                     api_url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
                     
-                    # --- 检索 Prompt ---
+                    # --- 检索 Prompt 升级：强制提取具体 URL ---
                     prompt_search = f"""
                     你是一位核科学研究员。请利用 Google Search 寻找真实文献。
                     
                     **用户课题：** "{search_query}"
                     
-                    **严格指令 (Anti-Hallucination & Bilingual):**
-                    1. **链接真实性校验 (URL Accuracy)**：
-                       - **必须使用** Google Search 搜索结果 Snippet 中提供的真实 URL。
-                       - **严禁** 使用 `google.com/grounding-api-redirect` 链接。
-                       - 如果搜索结果没有直接的论文链接，请使用该结果指向的新闻或摘要页面的 URL。
+                    **执行步骤 (Chain of Thought):**
+                    1. 使用具体的关键词搜索 (例如包含 "site:nature.com" 或 "filetype:pdf")。
+                    2. 在搜索结果中，寻找**具体的文章页面**或**PDF文档**。
+                    3. 提取该结果的**完整URL**。
                     
-                    2. **双语内容 (Bilingual Content)**：
-                       - JSON 必须包含英文原文（`title`, `summary`）**和** 中文翻译（`title_zh`, `summary_zh`）。
-                       - 英文部分保持原汁原味，中文部分提供高质量翻译。
+                    **严格指令 (Strict Rules):**
+                    1. **URL必须是深层链接 (DEEP LINK REQUIRED)**：
+                       - **严禁**提供期刊首页 (如 www.nature.com)。
+                       - **必须**提供具体文章页 (如 www.nature.com/articles/...)。
+                       - 如果找不到直接链接，不要编造，留空即可。
+                    
+                    2. **双语内容 (Bilingual)**：
+                       - 标题和摘要必须同时包含英文原文和中文翻译。
 
                     **输出格式 (JSON Object):**
                     {{
-                        "overview": "150字左右的中文综述，总结该领域的最新进展...",
+                        "overview": "150字左右的中文综述...",
                         "papers": [
                             {{
-                                "title": "Original English Title from search result",
+                                "title_en": "Original English Title",
                                 "title_zh": "中文翻译标题",
-                                "authors": "Author/Institution",
-                                "publication": "Source (e.g. Nature)",
+                                "authors": "Authors",
+                                "publication": "Source",
                                 "year": "Year",
-                                "summary": "Original English snippet/summary from search",
-                                "summary_zh": "中文翻译摘要",
-                                "doi": "DOI or empty string",
-                                "url": "MUST be the EXACT URL from the search snippet"
+                                "summary_en": "Original English Abstract...",
+                                "summary_zh": "中文翻译摘要...",
+                                "doi": "DOI string",
+                                "url": "EXACT DEEP URL from search result"
                             }}
                         ]
                     }}
@@ -490,32 +479,37 @@ with tab2:
                                     if papers:
                                         st.success(f"检索到 {len(papers)} 篇相关高价值文献")
                                         for item in papers:
-                                            title = item.get('title', 'Unknown Title')
+                                            title = item.get('title_en', item.get('title', 'Unknown'))
                                             title_zh = item.get('title_zh', '')
-                                            summary = item.get('summary', 'No summary available.')
+                                            summary_en = item.get('summary_en', item.get('summary', ''))
                                             summary_zh = item.get('summary_zh', '')
                                             
                                             display_title = title
                                             if title_zh:
                                                 display_title = f"{title}<br><span style='font-size:0.8em; color:#a0aec0; font-weight:normal'>{title_zh}</span>"
                                             
-                                            display_summary = summary
+                                            display_summary = summary_en
                                             if summary_zh:
-                                                display_summary = f"{summary}<br><br><span style='color:#90cdf4;'>[译] {summary_zh}</span>"
+                                                display_summary = f"{summary_en}<br><br><span style='color:#90cdf4;'>[译] {summary_zh}</span>"
 
                                             doi = item.get('doi', '')
                                             url = item.get('url', '#')
                                             
-                                            # 清洗 url
+                                            # 链接智能验证
                                             scholar_btn_text = "🔍 Google Scholar"
-                                            if not url or "grounding-api-redirect" in url:
+                                            
+                                            # 如果链接看起来像根域名或无效
+                                            is_deep_link = True
+                                            if not url or "grounding-api-redirect" in url or url == '#' or url.count('/') <= 3:
+                                                is_deep_link = False
+                                                # 构造精准搜索
                                                 scholar_q = urllib.parse.quote(title)
                                                 url = f"https://scholar.google.com/scholar?q={scholar_q}"
-                                                url_text = "🔍 搜索原文 (Link Unavailable)"
+                                                url_text = "🔍 搜索原文 (Smart Search)"
                                             else:
-                                                url_text = "🔗 来源链接/Source"
+                                                url_text = "🔗 查看原文 (Direct Link)"
 
-                                            # 备用 Scholar 链接 (始终显示)
+                                            # 备用 Scholar 链接
                                             scholar_q_safe = urllib.parse.quote(title)
                                             scholar_url_safe = f"https://scholar.google.com/scholar?q={scholar_q_safe}"
                                             
