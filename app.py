@@ -193,7 +193,7 @@ def parse_json_response(text):
 # --- 6. 主逻辑 ---
 with st.sidebar:
     st.title("⚛️ Nuclear Hub")
-    st.info("**版本**: Pro Max v2.4 (Fix URL & Trans)")
+    st.info("**版本**: Pro Max v2.5 (Original + Trans)")
     st.caption("Powered by Google Gemini & Streamlit")
 
 st.title("Nuclear Knowledge Hub")
@@ -308,7 +308,6 @@ with tab1:
                                             """, unsafe_allow_html=True)
                                             
                                             evidence_list = item.get('evidence_list', [])
-                                            # 兼容旧格式
                                             if not evidence_list and 'evidence_quote' in item:
                                                 evidence_list = [{'source_name': '权威数据', 'content': item['evidence_quote'], 'url': '#'}]
 
@@ -363,33 +362,34 @@ with tab2:
                     if not model_name.startswith("models/"): model_name = f"models/{model_name}"
                     api_url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
                     
-                    # --- 核心修改：防幻觉 Prompt + 强制分离翻译字段 ---
+                    # --- 核心修改：双语对照 + 严格链接 ---
                     prompt_search = f"""
                     你是一位核科学研究员。请利用 Google Search 寻找真实文献。
                     
                     **用户课题：** "{search_query}"
                     
-                    **严格指令 (Anti-Hallucination):**
-                    1. **链接真实性校验**：
-                       - 你输出的 `url` 必须**严格等于**搜索结果中提供的 Snippet URL。
-                       - **严禁**自己拼凑链接（不要猜测 nature.com/articles/... 这种链接，除非搜索结果里明确写了）。
-                       - 如果搜索结果里没有直接的论文链接，就不要列出那条结果。
+                    **严格指令 (Anti-Hallucination & Bilingual):**
+                    1. **链接真实性校验 (URL Accuracy)**：
+                       - **必须使用** Google Search 搜索结果 Snippet 中提供的真实 URL。
+                       - **严禁** 自己编造链接（例如不要猜测 .pdf 链接）。
+                       - 如果搜索结果没有直接的论文链接，请使用该结果指向的新闻或摘要页面的 URL。
                     
-                    2. **强制翻译 (Mandatory Translation)**：
-                       - JSON中必须包含 `title_en` (原标题) 和 `title_zh` (中文翻译) 两个独立字段。
-                       - JSON中必须包含 `summary_zh` (中文摘要)。不要写英文摘要。
+                    2. **双语内容 (Bilingual Content)**：
+                       - JSON 必须包含英文原文（`title`, `summary`）**和** 中文翻译（`title_zh`, `summary_zh`）。
+                       - 英文部分保持原汁原味，中文部分提供高质量翻译。
 
                     **输出格式 (JSON Object):**
                     {{
                         "overview": "150字左右的中文综述，总结该领域的最新进展...",
                         "papers": [
                             {{
-                                "title_en": "English Title strictly from search result",
-                                "title_zh": "这里写中文翻译",
+                                "title": "Original English Title from search result",
+                                "title_zh": "中文翻译标题",
                                 "authors": "Author/Institution",
                                 "publication": "Source (e.g. Nature)",
                                 "year": "Year",
-                                "summary_zh": "这里写详细的中文摘要",
+                                "summary": "Original English snippet/summary from search",
+                                "summary_zh": "中文翻译摘要",
                                 "doi": "DOI or empty string",
                                 "url": "MUST be the EXACT URL from the search snippet"
                             }}
@@ -443,16 +443,23 @@ with tab2:
                                     if papers:
                                         st.success(f"检索到 {len(papers)} 篇相关高价值文献")
                                         for item in papers:
-                                            # 获取字段，优先使用分立的翻译字段
-                                            title_en = item.get('title_en', item.get('title', 'Unknown Title'))
+                                            # 提取字段
+                                            title = item.get('title', 'Unknown Title')
                                             title_zh = item.get('title_zh', '')
-                                            summary = item.get('summary_zh', item.get('summary', '暂无摘要'))
+                                            summary = item.get('summary', 'No summary available.')
+                                            summary_zh = item.get('summary_zh', '')
                                             
-                                            # 组合标题显示
-                                            display_title = title_en
+                                            # 构建显示HTML
+                                            # 标题部分：英文 + 中文
+                                            display_title = title
                                             if title_zh:
-                                                display_title = f"{title_en}<br><span style='font-size:0.8em; color:#a0aec0; font-weight:normal'>{title_zh}</span>"
+                                                display_title = f"{title}<br><span style='font-size:0.8em; color:#a0aec0; font-weight:normal'>{title_zh}</span>"
                                             
+                                            # 摘要部分：英文 + 中文
+                                            display_summary = summary
+                                            if summary_zh:
+                                                display_summary = f"{summary}<br><br><span style='color:#90cdf4;'>[译] {summary_zh}</span>"
+
                                             doi = item.get('doi', '')
                                             url = item.get('url', '#')
                                             
@@ -468,7 +475,7 @@ with tab2:
                                                     </div>
                                                     <div style="border-top: 1px solid #4a5568; margin-bottom: 10px;"></div>
                                                     <div style="line-height: 1.6; color: #cbd5e0; font-family: 'Noto Serif SC', serif;">
-                                                        {summary}
+                                                        {display_summary}
                                                     </div>
                                                 """, unsafe_allow_html=True)
                                                 
