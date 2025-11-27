@@ -56,7 +56,7 @@ st.markdown("""
             box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
         
-        /* 新增：学术综述卡片样式 */
+        /* 学术综述卡片样式 */
         .overview-card {
             border: 1px solid #5a4b81; 
             border-left: 5px solid #9f7aea; /* 紫色系 */
@@ -65,6 +65,20 @@ st.markdown("""
             margin-bottom: 1.5rem;
             background-color: #322659; /* 深紫色背景 */
             color: #e9d8fd;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+
+        /* 新增：学术改写卡片样式 */
+        .rewrite-card {
+            border: 1px solid #285e61;
+            border-left: 5px solid #38b2ac; /* 青色系 */
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            background-color: #234e52; /* 深青色背景 */
+            color: #e6fffa;
+            font-family: "Noto Serif SC", serif; /* 使用衬线字体增加学术感 */
+            line-height: 1.8;
             box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
 
@@ -209,19 +223,19 @@ with st.sidebar:
     st.title("⚛️ Nuclear Hub")
     st.info(
         """
-        **版本**: Pro Max v2.3
+        **版本**: Pro Max v2.4 (Plus)
         
         本平台集成了 Google Gemini 2.5 Flash 模型，
-        具备实时联网核查与深度学术检索能力。
+        具备实时联网核查、深度学术检索与高级学术改写能力。
         """
     )
     st.caption("Powered by Google Gemini & Streamlit")
 
 st.title("Nuclear Knowledge Hub")
-st.caption("🚀 核科学事实核查与学术检索平台")
+st.caption("🚀 核科学事实核查、学术检索与专业改写平台")
 
-# 创建两个独立的 Tabs
-tab1, tab2 = st.tabs(["🔍智能核查 (Check)", "🔬学术检索 (Search)"])
+# 创建三个独立的 Tabs (新增 "学术改写")
+tab1, tab2, tab3 = st.tabs(["🔍 智能核查 (Check)", "🔬 学术检索 (Search)", "✍️ 学术改写 (Rewrite)"])
 
 # ==========================================
 # 模块一：智能核查 (Nuclear Check)
@@ -519,3 +533,93 @@ with tab2:
                             st.error(f"请求失败: {response.status_code}")
                     except Exception as e:
                         st.error(f"网络错误: {e}")
+
+# ==========================================
+# 模块三：学术改写 (Academic Rewrite) - 新增
+# ==========================================
+with tab3:
+    col1_rewrite, col2_rewrite = st.columns([1, 1], gap="large")
+
+    with col1_rewrite:
+        st.markdown("#### ✍️ 原始草稿")
+        user_text_rewrite = st.text_area(
+            "待改写文本", 
+            height=500, 
+            label_visibility="collapsed", 
+            placeholder="请在此粘贴您的论文草稿、段落或句子...\n系统将优化逻辑、词汇与句式，使其符合高水平发表标准。", 
+            key="input_rewrite"
+        )
+        rewrite_btn = st.button("✨ 开始学术改写", type="primary", use_container_width=True, key="btn_rewrite")
+
+    with col2_rewrite:
+        st.markdown("#### 🖋️ 改写结果")
+        if rewrite_btn and user_text_rewrite:
+            if not API_KEY:
+                st.error("🔒 请在侧边栏输入 API Key")
+            else:
+                status_box_rewrite = st.status("正在进行语言润色与逻辑重构...", expanded=True)
+                model_name, _ = get_available_model(API_KEY)
+                
+                if model_name:
+                    if not model_name.startswith("models/"): model_name = f"models/{model_name}"
+                    
+                    # 这里的URL不需要Google Search Tools，纯文本生成即可，使用 stream=True 体验更好（流式暂未开启，保持结构一致）
+                    api_url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
+
+                    # --- 学术改写 Prompt ---
+                    prompt_rewrite = f"""
+                    你是一位顶尖的学术论文润色专家（Native Academic Editor）。
+                    请对以下文本进行深度学术改写，旨在对用户输入的文字改写为官方的可靠的学术性的文字，而非能被直接看出来是ai的。
+
+                    **待改写文本：**
+                    '''{user_text_rewrite}'''
+
+                    **核心目标：**
+                    1.  **去AI化与人性化**：调整段落韵律（Rhythm），使其符合人类专家的写作习惯。适度穿插学术界常用的口语化表达（如“It is worth noting that...”, "In this context..."等），避免生硬的机器翻译感。
+                    2.  **句式与逻辑优化**：
+                        -   **多写长句子**：构建逻辑严密的长句，体现学术的深度。
+                        -   **少用短句**：避免破碎、幼稚的短句堆砌。
+                        -   **连接词替换**：把句子里的过渡词和连词替换为基本和常用的那种表达（Simple Connectors），尽量简单，避免复杂的词汇。句子之间的逻辑要说明白。
+                    3.  **词汇升维**：
+                        -   将单词扩展为短语（例如将“Uses”改为“Leverages the potential of”）。
+                        -   更换同义词，优化用词多样性。
+                    4.  **严格约束**：
+                        -   **少举例子**，**不要说废话**。
+                        -   不要频繁使用主语（如“我们”），多用被动语态或物称主语。
+                        -   **绝对禁止修改专业名词**：保持术语的原始准确性。
+                        -   即便原来的文字已经符合要求，也需要转述为另一种也符合要求的文字。
+
+                    **输出要求：**
+                    - 仅输出改写后的文本，不要包含任何前言后语。
+                    - 保持语言通俗易懂，但具有高度的学术性。
+                    """
+
+                    payload = {
+                        "contents": [{"parts": [{ "text": prompt_rewrite }]}]
+                    }
+
+                    try:
+                        response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload)
+                        if response.status_code == 200:
+                            result = response.json()
+                            candidates = result.get('candidates', [])
+                            content_parts = candidates[0].get('content', {}).get('parts', [])
+                            rewrite_result = content_parts[0].get('text', "") if content_parts else ""
+                            
+                            status_box_rewrite.update(label="润色完成", state="complete", expanded=False)
+                            
+                            if rewrite_result:
+                                st.markdown(f"""
+                                <div class="rewrite-card">
+                                    {rewrite_result.replace(chr(10), '<br>')}
+                                </div>
+                                """, unsafe_allow_html=True)
+                                
+                                # 添加复制功能提示
+                                st.caption("💡 提示：您可以直接复制上方卡片中的内容。")
+                            else:
+                                st.error("生成内容为空，请重试。")
+                        else:
+                            st.error(f"API 请求失败: {response.status_code}")
+                    except Exception as e:
+                        st.error(f"连接错误: {e}")
