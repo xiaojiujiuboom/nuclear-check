@@ -73,13 +73,24 @@ st.markdown("""
             border: 1px solid #285e61;
             border-left: 5px solid #38b2ac; /* 青色系 */
             border-radius: 8px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
+            padding: 2rem;
+            margin-bottom: 1.0rem;
             background-color: #234e52; /* 深青色背景 */
             color: #e6fffa;
             font-family: "Noto Serif SC", serif; /* 使用衬线字体增加学术感 */
             line-height: 1.8;
+            font-size: 1.05rem;
             box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        
+        /* 翻译部分样式 */
+        .translation-section {
+            margin-top: 1.5rem;
+            padding-top: 1.5rem;
+            border-top: 1px dashed #4fd1c5;
+            color: #b2f5ea;
+            font-size: 0.95rem;
+            font-style: italic;
         }
 
         .source-link {
@@ -223,7 +234,7 @@ with st.sidebar:
     st.title("⚛️ Nuclear Hub")
     st.info(
         """
-        **版本**: Pro Max v2.4 (Plus)
+        **版本**: Pro Max v2.5 (Humanized)
         
         本平台集成了 Google Gemini 2.5 Flash 模型，
         具备实时联网核查、深度学术检索与高级学术改写能力。
@@ -563,35 +574,37 @@ with tab3:
                 if model_name:
                     if not model_name.startswith("models/"): model_name = f"models/{model_name}"
                     
-                    # 这里的URL不需要Google Search Tools，纯文本生成即可，使用 stream=True 体验更好（流式暂未开启，保持结构一致）
                     api_url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
 
-                    # --- 学术改写 Prompt ---
+                    # --- 升级版学术改写 Prompt ---
                     prompt_rewrite = f"""
-                    你是一位顶尖的学术论文润色专家（Native Academic Editor）。
-                    请对以下文本进行深度学术改写，旨在对用户输入的文字改写为官方的可靠的学术性的文字，而非能被直接看出来是ai的。
+                    你是一位在 Nature/Science 级别期刊有丰富经验的**人类学术编辑**。
+                    请对以下文本进行**彻底的去AI化（De-AI）改写**，并提供双语对照。
 
                     **待改写文本：**
                     '''{user_text_rewrite}'''
 
-                    **核心目标：**
-                    1.  **去AI化与人性化**：调整段落韵律（Rhythm），使其符合人类专家的写作习惯。适度穿插学术界常用的口语化表达（如“It is worth noting that...”, "In this context..."等），避免生硬的机器翻译感。
-                    2.  **句式与逻辑优化**：
-                        -   **多写长句子**：构建逻辑严密的长句，体现学术的深度。
-                        -   **少用短句**：避免破碎、幼稚的短句堆砌。
-                        -   **连接词替换**：把句子里的过渡词和连词替换为基本和常用的那种表达（Simple Connectors），尽量简单，避免复杂的词汇。句子之间的逻辑要说明白。
-                    3.  **词汇升维**：
-                        -   将单词扩展为短语（例如将“Uses”改为“Leverages the potential of”）。
-                        -   更换同义词，优化用词多样性。
-                    4.  **严格约束**：
-                        -   **少举例子**，**不要说废话**。
-                        -   不要频繁使用主语（如“我们”），多用被动语态或物称主语。
-                        -   **绝对禁止修改专业名词**：保持术语的原始准确性。
-                        -   即便原来的文字已经符合要求，也需要转述为另一种也符合要求的文字。
+                    **🚫 负面约束（绝对禁止 - Violations will be rejected）：**
+                    1.  **禁止滥用连接副词**：严禁在句首堆砌 "Fundamentally", "Crucially", "Furthermore", "Moreover", "Additionally", "Importantly"。请通过句子内在的逻辑流来衔接，而非生硬的路标词。
+                    2.  **拒绝名词化（Nominalization）**：不要说 "The realization of X necessitates Y"（X的实现需要Y），要说 "To realize X, we must Y"（为了实现X，我们必须Y）。**多用强有力的动词**（Active Verbs），少用抽象名词（如 modality, provision, utilization, facilitation）。
+                    3.  **拒绝僵硬的长难句**：不要写那种中间没有停顿、修饰语密集堆砌的窒息长句。句子要有呼吸感（Rhythm），自然地长短句结合。
+                    4.  **去"机器味"**：不要用 "demonstrates the potential", "underpinned by", "is characterized by"。像人类专家一样直接表达观点。
 
-                    **输出要求：**
-                    - 仅输出改写后的文本，不要包含任何前言后语。
-                    - 保持语言通俗易懂，但具有高度的学术性。
+                    **✅ 核心目标：**
+                    1.  **人类化（Human-like）**：模仿人类专家的写作习惯，词汇选择要精准但不做作。
+                    2.  **双语输出（Bilingual Output）**：
+                        -   如果改写后的正文是**英文**，必须在下方附上高水平的**中文翻译**。
+                        -   如果改写后的正文是**中文**，必须在下方附上地道的**英文翻译**。
+                        -   翻译也要符合上述的学术标准，不要直译。
+
+                    **输出格式（必须严格遵守）：**
+                    请按以下标签分隔内容：
+
+                    [REWRITE]
+                    (这里是改写后的优美学术文本)
+
+                    [TRANSLATION]
+                    (这里是对应的另一种语言的高水平翻译)
                     """
 
                     payload = {
@@ -604,19 +617,40 @@ with tab3:
                             result = response.json()
                             candidates = result.get('candidates', [])
                             content_parts = candidates[0].get('content', {}).get('parts', [])
-                            rewrite_result = content_parts[0].get('text', "") if content_parts else ""
+                            full_text = content_parts[0].get('text', "") if content_parts else ""
                             
                             status_box_rewrite.update(label="润色完成", state="complete", expanded=False)
                             
-                            if rewrite_result:
+                            if full_text:
+                                # 解析 [REWRITE] 和 [TRANSLATION]
+                                rewrite_content = full_text
+                                translation_content = ""
+                                
+                                if "[REWRITE]" in full_text and "[TRANSLATION]" in full_text:
+                                    parts = full_text.split("[TRANSLATION]")
+                                    rewrite_part = parts[0].replace("[REWRITE]", "").strip()
+                                    translation_part = parts[1].strip()
+                                    
+                                    rewrite_content = rewrite_part
+                                    translation_content = translation_part
+                                else:
+                                    # Fallback: 如果AI没按格式输出，尝试简单清洗
+                                    rewrite_content = full_text.replace("[REWRITE]", "").replace("[TRANSLATION]", "")
+
                                 st.markdown(f"""
                                 <div class="rewrite-card">
-                                    {rewrite_result.replace(chr(10), '<br>')}
+                                    <div style="margin-bottom: 10px; font-weight: bold; color: #81e6d9;">🖋️ Revised Text:</div>
+                                    {rewrite_content.replace(chr(10), '<br>')}
+                                    
+                                    {f'''
+                                    <div class="translation-section">
+                                        <div style="margin-bottom: 8px; font-weight: bold;">🌐 Translation:</div>
+                                        {translation_content.replace(chr(10), '<br>')}
+                                    </div>
+                                    ''' if translation_content else ''}
                                 </div>
                                 """, unsafe_allow_html=True)
                                 
-                                # 添加复制功能提示
-                                st.caption("💡 提示：您可以直接复制上方卡片中的内容。")
                             else:
                                 st.error("生成内容为空，请重试。")
                         else:
