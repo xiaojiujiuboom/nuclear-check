@@ -578,17 +578,17 @@ with tab3:
 
                     # --- 升级版学术改写 Prompt ---
                     prompt_rewrite = f"""
-                    你是一位在 Nature/Science 级别期刊有丰富经验的**人类学术编辑**。
+                    你是一位在高级核杂质期刊有丰富经验的**人类学术编辑**。
                     请对以下文本进行**彻底的去AI化（De-AI）改写**，并提供双语对照。
 
                     **待改写文本：**
                     '''{user_text_rewrite}'''
 
                     **🚫 负面约束（绝对禁止 - Violations will be rejected）：**
-                    1.  **禁止滥用连接副词**：严禁在句首堆砌 "Fundamentally", "Crucially", "Furthermore", "Moreover", "Additionally", "Importantly"。请通过句子内在的逻辑流来衔接，而非生硬的路标词。
-                    2.  **拒绝名词化（Nominalization）**：不要说 "The realization of X necessitates Y"（X的实现需要Y），要说 "To realize X, we must Y"（为了实现X，我们必须Y）。**多用强有力的动词**（Active Verbs），少用抽象名词（如 modality, provision, utilization, facilitation）。
-                    3.  **拒绝僵硬的长难句**：不要写那种中间没有停顿、修饰语密集堆砌的窒息长句。句子要有呼吸感（Rhythm），自然地长短句结合。
-                    4.  **去"机器味"**：不要用 "demonstrates the potential", "underpinned by", "is characterized by"。像人类专家一样直接表达观点。
+                    1.  **禁止滥用连接副词**：严禁在句中堆砌你认为高大上的 "Fundamentally", "Crucially", "Furthermore", "Moreover", "Additionally", "Importantly"等副词进行强调。请通过句子内在的逻辑流来衔接，而非生硬的路标词。
+                    2.  **拒绝名词化（Nominalization）**：例如：不要说 "The realization of X necessitates Y"（X的实现需要Y），要说 "To realize X, we must Y"（为了实现X，我们必须Y）。少用抽象名词（如 modality, provision, utilization, facilitation）。
+                    3.  **拒绝僵硬的长难句**：不要写那种中间没有停顿、修饰语密集堆砌的长句。句子要有呼吸感（Rhythm），自然地长短句结合。
+                    4.  **去"机器味"**：像人类专家一样直接表达观点。
 
                     **✅ 核心目标：**
                     1.  **人类化（Human-like）**：模仿人类专家的写作习惯，词汇选择要精准但不做作。
@@ -596,6 +596,12 @@ with tab3:
                         -   如果改写后的正文是**英文**，必须在下方附上高水平的**中文翻译**。
                         -   如果改写后的正文是**中文**，必须在下方附上地道的**英文翻译**。
                         -   翻译也要符合上述的学术标准，不要直译。
+                    **✅可以参考学习模仿以下写作风格：**
+                     1.  "Direct drive means conducting electrons as the energy to create a reaction, usually in the form of laser beams, and directly hitting the fuel pellet and indirectly hitting the capsule around the pellet, with those laser beams. Indirect drive means turning laser light frequencies into x-ray beams, to heat the capsule in a less intense and pressuring way with a similar amount of heat⁸. Because indirect drive is essentially very similar to direct drive and has not actually been tested in a reactor, when mentioning ICF in the article, it will be generally referring to direct drive.
+
+Both main kinds of fusion (ICF and MCF) have their pros and cons. Each is incredibly unique and is hard to compare because the process of achieving a fusion reaction is so different. To understand ICF and MCF better, it’s important to know how they work."                                                                                                                                            
+                     2.   "In this work, we present the results of an experiment aiming at proton acceleration using a focus with a homogeneous intensity distribution, called smoothed focus. To achieve this goal, we implemented a phase plate before the pre-amplifier of the Petawatt High-Energy Laser for Heavy Ion EXperiments laser facility. The phase plate was used for the first time at a high-power short-pulse laser. Demonstrating a low divergent ion beam was the main goal ofthis work. Numerical simulations using the particle-in-cell code Extendable PIC Open Collaboration estimated a 2–5 times reduction in the angular divergence of the proton beam using a phase plate due to a smoother sheath at the rear side of the target. However, the reduction in the angular divergence was not sensible according to the experimental data. A positive point is that the spectrum of protons that are generated with the smoothed beam is shifted toward lower energies, provided that the laser absorption is kept in check, compared to the Gaussian proton spectrum. Moreover, the number ofprotons that are generated with the smoothed beam is higher than the ones generated with the Gaussian beam."                                                                                                                                          
+                     3.   "The interaction of ultraintense laser pulses with solids is largely affected by the plasma gradient at the vacuum–solid interface, which modifies the absorption and ultimately, controls the energy distribution function of heated electrons. A micrometer scale-length plasma has been predicted to yield a significant enhancement of the energy and weight of the fast electron population and to play a major role in laser-driven proton acceleration with thin foils. We report on recent experimental results on proton acceleration from laser interaction with foil targets at ultra-relativistic intensities. We show a threefold increase of the proton cut-off energy when a micrometer scale-length pre-plasma is introduced by irradiation with a low energy femtosecond pre-pulse. Our realistic numerical simulations agree with the observed gain of the proton cut-off energy and confirm the role of stochastic heating of fast electrons in the enhancement of the accelerating sheath field."                                                                                                                                           
 
                     **输出格式（必须严格遵守）：**
                     请按以下标签分隔内容：
