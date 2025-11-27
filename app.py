@@ -234,7 +234,7 @@ with st.sidebar:
     st.title("⚛️ Nuclear Hub")
     st.info(
         """
-        **版本**: Pro Max v2.5 (Humanized)
+        **版本**: Pro Max v2.6 (Patch)
         
         本平台集成了 Google Gemini 2.5 Flash 模型，
         具备实时联网核查、深度学术检索与高级学术改写能力。
@@ -637,17 +637,17 @@ with tab3:
                                     # Fallback: 如果AI没按格式输出，尝试简单清洗
                                     rewrite_content = full_text.replace("[REWRITE]", "").replace("[TRANSLATION]", "")
 
+                                # 构建 HTML 内容，避免缩进导致的 Markdown 代码块渲染问题
+                                # 使用 compact string 避免产生空格缩进
+                                translation_html = ""
+                                if translation_content:
+                                    translation_html = f"""<div class="translation-section"><div style="margin-bottom: 8px; font-weight: bold;">🌐 Translation:</div>{translation_content.replace(chr(10), '<br>')}</div>"""
+
                                 st.markdown(f"""
                                 <div class="rewrite-card">
                                     <div style="margin-bottom: 10px; font-weight: bold; color: #81e6d9;">🖋️ Revised Text:</div>
                                     {rewrite_content.replace(chr(10), '<br>')}
-                                    
-                                    {f'''
-                                    <div class="translation-section">
-                                        <div style="margin-bottom: 8px; font-weight: bold;">🌐 Translation:</div>
-                                        {translation_content.replace(chr(10), '<br>')}
-                                    </div>
-                                    ''' if translation_content else ''}
+                                    {translation_html}
                                 </div>
                                 """, unsafe_allow_html=True)
                                 
