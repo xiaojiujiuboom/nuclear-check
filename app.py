@@ -174,6 +174,7 @@ def get_available_model(api_key):
 
         # 优先级匹配逻辑
         preferred_order = [
+            'gemini-3.0-flash',
             'gemini-2.5-flash',
             'gemini-1.5-flash',
             'gemini-1.5-flash-latest',
@@ -234,9 +235,9 @@ with st.sidebar:
     st.title("⚛️ Nuclear Hub")
     st.info(
         """
-        **版本**: Pro Max v2.6 (Patch)
+        **版本**: Pro Max v2.7 (Patch)
         
-        本平台集成了 Google Gemini 2.5 Flash 模型，
+        本平台集成了 Google Gemini 3.0 Flash 模型，
         具备实时联网核查、深度学术检索与高级学术改写能力。
         """
     )
