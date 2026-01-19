@@ -68,7 +68,7 @@ st.markdown("""
             box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
 
-        /* 新增：学术改写卡片样式 */
+        /* 学术改写卡片样式 */
         .rewrite-card {
             border: 1px solid #285e61;
             border-left: 5px solid #38b2ac; /* 青色系 */
@@ -172,19 +172,18 @@ def get_available_model(api_key):
         
         if not model_names: return None, "未找到任何可用模型"
 
-        # 优先级匹配逻辑 (更新为最新模型)
+        # 优先级匹配逻辑 (优先使用 1.5-flash，因为它对 Search 支持最稳定，其次是 2.0/2.5)
+        # 修正：将 1.5-flash 提权以保证稳定性，避免预览版模型的 400 兼容性问题
         preferred_order = [
-            'gemini-2.5-flash-preview', # 最新预览版
-            'gemini-2.0-flash-exp',     # 实验版 (俗称的下一代)
-            'gemini-2.0-flash',
             'gemini-1.5-flash',
+            'gemini-2.5-flash-preview', 
+            'gemini-2.0-flash-exp',
             'gemini-1.5-pro'
         ]
 
         selected_model = None
         for pref in preferred_order:
             for available_model in model_names:
-                # 模糊匹配模型名称
                 if pref in available_model: 
                     selected_model = available_model
                     break
@@ -201,37 +200,45 @@ def get_available_model(api_key):
 # --- 5. 辅助函数：解析 AI 返回的 JSON ---
 def parse_json_response(text):
     """
-    增强版解析器：
-    1. 优先尝试直接 JSON.loads (对应 Native JSON Mode)
-    2. 其次尝试去除 Markdown 标记
-    3. 最后尝试提取 { ... } 或 [ ... ]
+    鲁棒性解析器：不依赖 API 的 JSON Mode，而是通过代码强力提取
     """
     try:
-        # 1. 尝试直接解析 (适用于 Native JSON Mode 返回的纯净数据)
+        # 1. 尝试直接解析
         return json.loads(text)
     except:
         pass
 
     try:
-        # 2. 清理 Markdown 标记
+        # 2. 清理 Markdown 标记 (```json ... ```)
         clean_text = re.sub(r'```json\s*', '', text)
         clean_text = re.sub(r'```\s*$', '', clean_text)
         clean_text = clean_text.strip()
         return json.loads(clean_text)
     except Exception:
-        # 3. 尝试提取 {} 或 [] 区间
+        # 3. 暴力提取 {} 或 [] 区间
         try:
             start_obj = text.find('{')
             start_list = text.find('[')
             
-            if start_obj != -1 and (start_list == -1 or start_obj < start_list):
-                # 这是一个对象
+            # 如果两个都找到了，取最前面的那个
+            if start_obj != -1 and start_list != -1:
+                if start_obj < start_list:
+                    # 看起来是对象
+                    end = text.rfind('}') + 1
+                    return json.loads(text[start_obj:end])
+                else:
+                    # 看起来是列表
+                    end = text.rfind(']') + 1
+                    return json.loads(text[start_list:end])
+            
+            # 只有一个找到了
+            elif start_obj != -1:
                 end = text.rfind('}') + 1
                 return json.loads(text[start_obj:end])
             elif start_list != -1:
-                # 这是一个列表
                 end = text.rfind(']') + 1
                 return json.loads(text[start_list:end])
+                
             return None
         except:
             return None
@@ -242,10 +249,10 @@ with st.sidebar:
     st.title("⚛️ Nuclear Hub")
     st.info(
         """
-        **版本**: Pro Max v2.8 (Stable)
+        **版本**: Pro Max v2.9 (Stable Fix)
         
-        本平台优先接入 **Gemini 2.5 Flash / 2.0 Flash**，
-        并启用了 **Native JSON Mode** 以确保检索稳定性。
+        已修复 "400 Bad Request" 问题。
+        恢复了 Google Search 联网功能的稳定性。
         """
     )
     st.caption("Powered by Google Gemini & Streamlit")
@@ -301,28 +308,29 @@ with tab1:
                        - 格式示例："The reactor has... (译文: 该反应堆拥有...)"。
                     3. **实时性**：以搜索到的最新官方报告为准。
 
-                    请输出一个纯 JSON 列表。每个对象结构如下：
-                    {{
-                        "claim": "原文中的陈述",
-                        "status": "正确/错误/存疑/数据不一致",
-                        "correction": "综合分析。如果数据冲突，请在此说明差异原因。",
-                        "evidence_list": [
-                            {{
-                                "source_name": "机构名称",
-                                "content": "具体描述/数据 (如果是英文请附带中文翻译)",
-                                "url": "来源链接"
-                            }}
-                        ]
-                    }}
+                    **输出格式要求：**
+                    请仅输出一个纯 JSON 列表（不要包含 markdown 标记 ```json ... ```），格式如下：
+                    [
+                        {{
+                            "claim": "原文中的陈述",
+                            "status": "正确/错误/存疑/数据不一致",
+                            "correction": "综合分析。如果数据冲突，请在此说明差异原因。",
+                            "evidence_list": [
+                                {{
+                                    "source_name": "机构名称",
+                                    "content": "具体描述/数据 (如果是英文请附带中文翻译)",
+                                    "url": "来源链接"
+                                }}
+                            ]
+                        }}
+                    ]
                     """
                     
-                    # 启用 Native JSON Mode
+                    # ⚠️ 修复：移除 generationConfig 中的 responseMimeType
+                    # 因为 Google Search (Grounding) 与 strict JSON mode 在 v1beta 经常冲突导致 400
                     payload = {
                         "contents": [{"parts": [{ "text": prompt_check }]}],
-                        "tools": [{"google_search": {}}],
-                        "generationConfig": {
-                            "responseMimeType": "application/json"
-                        }
+                        "tools": [{"google_search": {}}]
                     }
                     
                     status_box.write("🔍 正在联网检索最新数据...")
@@ -338,7 +346,6 @@ with tab1:
                                 content_parts = candidates[0].get('content', {}).get('parts', [])
                                 raw_content = content_parts[0].get('text', "") if content_parts else ""
                                 
-                                # 使用增强版解析器
                                 check_results = parse_json_response(raw_content)
                                 
                                 status_box.update(label="深度核查完成", state="complete", expanded=False)
@@ -375,7 +382,6 @@ with tab1:
                                             """, unsafe_allow_html=True)
                                             
                                             evidence_list = item.get('evidence_list', [])
-                                            # 兼容性处理
                                             if not evidence_list and 'evidence_quote' in item:
                                                 evidence_list = [{'source_name': '权威数据', 'content': item['evidence_quote'], 'url': '#'}]
 
@@ -405,7 +411,7 @@ with tab1:
                                 status_box.update(label="解析失败", state="error")
                                 st.error(f"解析错误: {e}")
                         else:
-                            st.error(f"API 请求失败: {response.status_code}")
+                            st.error(f"API 请求失败: {response.status_code} (请检查 Prompt 或网络)")
                     except Exception as e:
                         st.error(f"网络连接错误: {e}")
 
@@ -453,8 +459,8 @@ with tab2:
                     2. 提取信息，确保链接真实。
                     3. 编写综述。
                     
-                    **输出格式：**
-                    请输出一个包含两个字段的纯 JSON 对象：
+                    **输出格式要求：**
+                    请仅输出一个纯 JSON 对象（不要包含 markdown 标记），格式如下：
                     {{
                         "overview": "这里写中文综述，总结研究现状...",
                         "papers": [
@@ -471,13 +477,11 @@ with tab2:
                     }}
                     """
                     
-                    # 启用 Native JSON Mode - 这是解决"未能解析"的关键
+                    # ⚠️ 修复：移除 generationConfig 中的 responseMimeType
+                    # 解决 Search 工具与 JSON Mode 的冲突
                     payload = {
                         "contents": [{"parts": [{ "text": prompt_search }]}],
-                        "tools": [{"google_search": {}}],
-                        "generationConfig": {
-                            "responseMimeType": "application/json"
-                        }
+                        "tools": [{"google_search": {}}]
                     }
                     
                     status_box_search.write("🔍 正在连接 Google Scholar & 权威期刊库...")
@@ -595,7 +599,7 @@ with tab3:
                     
                     api_url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
 
-                    # --- 升级版学术改写 Prompt (保持文本模式，不强制JSON) ---
+                    # --- 升级版学术改写 Prompt ---
                     prompt_rewrite = f"""
                     你是一位在高级核杂质期刊有丰富经验的**人类学术编辑**。
                     请对以下文本进行**彻底的去AI化（De-AI）改写**，并提供双语对照。
@@ -633,7 +637,6 @@ with tab3:
 
                     payload = {
                         "contents": [{"parts": [{ "text": prompt_rewrite }]}]
-                        # 注意：此处不开启 JSON 模式，因为我们需要特定格式的文本块
                     }
 
                     try:
