@@ -172,12 +172,11 @@ def get_available_model(api_key):
         
         if not model_names: return None, "未找到任何可用模型"
 
-        # 优先级匹配逻辑 (优先使用 1.5-flash，因为它对 Search 支持最稳定，其次是 2.0/2.5)
-        # 修正：将 1.5-flash 提权以保证稳定性，避免预览版模型的 400 兼容性问题
+        # 优先级匹配逻辑
+        # 优先使用 1.5-flash，因为它对 Search 支持目前最稳定
         preferred_order = [
             'gemini-1.5-flash',
-            'gemini-2.5-flash-preview', 
-            'gemini-2.0-flash-exp',
+            'gemini-2.0-flash',
             'gemini-1.5-pro'
         ]
 
@@ -223,11 +222,9 @@ def parse_json_response(text):
             # 如果两个都找到了，取最前面的那个
             if start_obj != -1 and start_list != -1:
                 if start_obj < start_list:
-                    # 看起来是对象
                     end = text.rfind('}') + 1
                     return json.loads(text[start_obj:end])
                 else:
-                    # 看起来是列表
                     end = text.rfind(']') + 1
                     return json.loads(text[start_list:end])
             
@@ -249,10 +246,10 @@ with st.sidebar:
     st.title("⚛️ Nuclear Hub")
     st.info(
         """
-        **版本**: Pro Max v2.9 (Stable Fix)
+        **版本**: Pro Max v3.0 (Auto-Fallback)
         
-        已修复 "400 Bad Request" 问题。
-        恢复了 Google Search 联网功能的稳定性。
+        具备自动诊断功能：
+        如果联网搜索失败，将自动降级为离线模式并重试。
         """
     )
     st.caption("Powered by Google Gemini & Streamlit")
@@ -326,8 +323,7 @@ with tab1:
                     ]
                     """
                     
-                    # ⚠️ 修复：移除 generationConfig 中的 responseMimeType
-                    # 因为 Google Search (Grounding) 与 strict JSON mode 在 v1beta 经常冲突导致 400
+                    # 初始尝试：带 Search Tools
                     payload = {
                         "contents": [{"parts": [{ "text": prompt_check }]}],
                         "tools": [{"google_search": {}}]
@@ -338,6 +334,15 @@ with tab1:
                     try:
                         response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload)
                         
+                        # --- 400 错误处理与自动降级 ---
+                        if response.status_code == 400:
+                            status_box.write("⚠️ 联网搜索遇到兼容性问题，正在尝试切换至离线智能分析模式...")
+                            # 移除 tools 再次尝试
+                            if "tools" in payload:
+                                del payload["tools"]
+                                time.sleep(1) # 稍作停顿避免速率限制
+                                response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload)
+
                         if response.status_code == 200:
                             result = response.json()
                             try:
@@ -348,10 +353,10 @@ with tab1:
                                 
                                 check_results = parse_json_response(raw_content)
                                 
-                                status_box.update(label="深度核查完成", state="complete", expanded=False)
+                                status_box.update(label="分析完成", state="complete", expanded=False)
                                 
                                 if check_results:
-                                    st.success(f"核查完成！已比对多方权威数据源")
+                                    st.success(f"分析完成！(如未显示来源链接，说明本次使用了离线知识库)")
                                     
                                     for item in check_results:
                                         status = item.get('status', '存疑')
@@ -382,6 +387,7 @@ with tab1:
                                             """, unsafe_allow_html=True)
                                             
                                             evidence_list = item.get('evidence_list', [])
+                                            # 兼容性处理
                                             if not evidence_list and 'evidence_quote' in item:
                                                 evidence_list = [{'source_name': '权威数据', 'content': item['evidence_quote'], 'url': '#'}]
 
@@ -411,7 +417,9 @@ with tab1:
                                 status_box.update(label="解析失败", state="error")
                                 st.error(f"解析错误: {e}")
                         else:
-                            st.error(f"API 请求失败: {response.status_code} (请检查 Prompt 或网络)")
+                            st.error(f"API 请求失败: {response.status_code}")
+                            st.markdown("**错误详情 (发给管理员):**")
+                            st.code(response.text) # 显示具体错误原因
                     except Exception as e:
                         st.error(f"网络连接错误: {e}")
 
@@ -477,8 +485,6 @@ with tab2:
                     }}
                     """
                     
-                    # ⚠️ 修复：移除 generationConfig 中的 responseMimeType
-                    # 解决 Search 工具与 JSON Mode 的冲突
                     payload = {
                         "contents": [{"parts": [{ "text": prompt_search }]}],
                         "tools": [{"google_search": {}}]
@@ -488,6 +494,16 @@ with tab2:
                     
                     try:
                         response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload)
+                        
+                        # --- 400 错误处理与自动降级 ---
+                        if response.status_code == 400:
+                            status_box_search.write("⚠️ 联网搜索遇到兼容性问题，正在尝试切换至离线智能分析模式...")
+                            # 移除 tools 再次尝试
+                            if "tools" in payload:
+                                del payload["tools"]
+                                time.sleep(1) # 稍作停顿
+                                response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload)
+
                         if response.status_code == 200:
                             result = response.json()
                             try:
@@ -527,7 +543,7 @@ with tab2:
 
                                     # --- 2. 展示文献列表 ---
                                     if papers:
-                                        st.success(f"检索到 {len(papers)} 篇相关高价值文献")
+                                        st.success(f"检索到 {len(papers)} 篇相关高价值文献 (离线模式下可能为 AI 生成)")
                                         
                                         for item in papers:
                                             title = item.get('title', '未知标题')
@@ -565,6 +581,8 @@ with tab2:
                                 st.error(f"解析错误: {e}")
                         else:
                             st.error(f"请求失败: {response.status_code}")
+                            st.markdown("**错误详情 (发给管理员):**")
+                            st.code(response.text)
                     except Exception as e:
                         st.error(f"网络错误: {e}")
 
@@ -681,5 +699,7 @@ with tab3:
                                 st.error("生成内容为空，请重试。")
                         else:
                             st.error(f"API 请求失败: {response.status_code}")
+                            st.markdown("**错误详情 (发给管理员):**")
+                            st.code(response.text)
                     except Exception as e:
                         st.error(f"连接错误: {e}")
