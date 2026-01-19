@@ -196,6 +196,41 @@ def get_available_model(api_key):
     except Exception as e:
         return None, str(e)
 
+# --- 新增：Robust API Call Helper ---
+def robust_api_call(url, payload, status_box=None):
+    """
+    封装 API 请求，自动处理 429 限流错误（指数退避重试）
+    """
+    max_retries = 3
+    base_wait = 5 # 基础等待时间
+    
+    for attempt in range(max_retries + 1):
+        try:
+            response = requests.post(url, headers={'Content-Type': 'application/json'}, json=payload)
+            
+            # 如果遇到 429 限流
+            if response.status_code == 429:
+                if attempt < max_retries:
+                    wait_time = base_wait * (2 ** attempt) # 5s, 10s, 20s
+                    if status_box:
+                        status_box.write(f"⏳ 触发 API 限流 (429)，系统将在 {wait_time} 秒后自动重试 (第 {attempt+1}/{max_retries} 次)...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    return response # 最后一次尝试也失败，返回错误响应
+            
+            # 其他情况直接返回
+            return response
+            
+        except requests.exceptions.RequestException as e:
+            if attempt < max_retries:
+                time.sleep(2)
+                continue
+            # 网络错误，这里简单处理，可以在外部捕获
+            return None
+            
+    return None
+
 # --- 5. 辅助函数：解析 AI 返回的 JSON ---
 def parse_json_response(text):
     """
@@ -246,10 +281,10 @@ with st.sidebar:
     st.title("⚛️ Nuclear Hub")
     st.info(
         """
-        **版本**: Pro Max v3.0 (Auto-Fallback)
+        **版本**: Pro Max v3.1 (Anti-429)
         
-        具备自动诊断功能：
-        如果联网搜索失败，将自动降级为离线模式并重试。
+        具备自动限流保护功能：
+        自动处理 "429 Too Many Requests" 错误。
         """
     )
     st.caption("Powered by Google Gemini & Streamlit")
@@ -332,94 +367,101 @@ with tab1:
                     status_box.write("🔍 正在联网检索最新数据...")
                     
                     try:
-                        response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload)
+                        # 使用 robust_api_call 替代 requests.post
+                        response = robust_api_call(api_url, payload, status_box)
                         
-                        # --- 400 错误处理与自动降级 ---
-                        if response.status_code == 400:
-                            status_box.write("⚠️ 联网搜索遇到兼容性问题，正在尝试切换至离线智能分析模式...")
-                            # 移除 tools 再次尝试
-                            if "tools" in payload:
-                                del payload["tools"]
-                                time.sleep(1) # 稍作停顿避免速率限制
-                                response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload)
-
-                        if response.status_code == 200:
-                            result = response.json()
-                            try:
-                                candidates = result.get('candidates', [])
-                                if not candidates: raise ValueError("无候选项")
-                                content_parts = candidates[0].get('content', {}).get('parts', [])
-                                raw_content = content_parts[0].get('text', "") if content_parts else ""
-                                
-                                check_results = parse_json_response(raw_content)
-                                
-                                status_box.update(label="分析完成", state="complete", expanded=False)
-                                
-                                if check_results:
-                                    st.success(f"分析完成！(如未显示来源链接，说明本次使用了离线知识库)")
-                                    
-                                    for item in check_results:
-                                        status = item.get('status', '存疑')
-                                        if "错" in status:
-                                            border_color = "#ff4b4b"
-                                            icon = "❌"
-                                            title_color = "#ff8a80"
-                                        elif "疑" in status or "不一致" in status:
-                                            border_color = "#ffa726"
-                                            icon = "⚠️"
-                                            title_color = "#ffcc80"
-                                        else:
-                                            border_color = "#66bb6a"
-                                            icon = "✅"
-                                            title_color = "#a5d6a7"
-                                        
-                                        with st.container():
-                                            st.markdown(f"""
-                                            <div class="check-card" style="border-left: 5px solid {border_color};">
-                                                <div style="margin-bottom: 12px;">
-                                                    <span style="font-weight: bold; font-size: 1.3em; color: {title_color};">{icon} {status}</span>
-                                                    <div style="color: #b0bec5; font-size: 0.9em; margin-top: 4px;">陈述：{item.get('claim', '')}</div>
-                                                </div>
-                                                <div style="margin-bottom: 15px; line-height: 1.6;">
-                                                    <b>💡 专家分析：</b><br>
-                                                    {item.get('correction', '无详细分析')}
-                                                </div>
-                                            """, unsafe_allow_html=True)
-                                            
-                                            evidence_list = item.get('evidence_list', [])
-                                            # 兼容性处理
-                                            if not evidence_list and 'evidence_quote' in item:
-                                                evidence_list = [{'source_name': '权威数据', 'content': item['evidence_quote'], 'url': '#'}]
-
-                                            if evidence_list:
-                                                st.markdown('<div class="evidence-container">', unsafe_allow_html=True)
-                                                st.markdown('<div style="color: #555; margin-bottom: 8px; font-weight:bold;">🔍 权威数据/原文证据：</div>', unsafe_allow_html=True)
-                                                for ev in evidence_list:
-                                                    source_name = ev.get('source_name', '来源')
-                                                    content = ev.get('content', '')
-                                                    url = ev.get('url', '#')
-                                                    st.markdown(f"""
-                                                    <div class="quote-item">
-                                                        <span class="tag-pill">[{source_name}]</span>
-                                                        "{content}"
-                                                        <br>
-                                                        <a href="{url}" target="_blank" class="source-link" style="margin-top:4px; display:inline-block;">🔗 来源</a>
-                                                    </div>
-                                                    """, unsafe_allow_html=True)
-                                                st.markdown('</div>', unsafe_allow_html=True)
-                                            st.markdown("</div>", unsafe_allow_html=True)
-
-                                else:
-                                    st.warning("AI 返回的内容无法解析")
-                                    st.markdown(raw_content)
-
-                            except Exception as e:
-                                status_box.update(label="解析失败", state="error")
-                                st.error(f"解析错误: {e}")
+                        # 如果 API 调用失败 (None)
+                        if response is None:
+                            status_box.update(label="请求超时", state="error")
+                            st.error("API 请求失败，请检查网络连接。")
+                        
                         else:
-                            st.error(f"API 请求失败: {response.status_code}")
-                            st.markdown("**错误详情 (发给管理员):**")
-                            st.code(response.text) # 显示具体错误原因
+                            # --- 400 错误处理与自动降级 ---
+                            if response.status_code == 400:
+                                status_box.write("⚠️ 联网搜索遇到兼容性问题，正在尝试切换至离线智能分析模式...")
+                                # 移除 tools 再次尝试
+                                if "tools" in payload:
+                                    del payload["tools"]
+                                    time.sleep(1) 
+                                    response = robust_api_call(api_url, payload, status_box)
+
+                            if response.status_code == 200:
+                                result = response.json()
+                                try:
+                                    candidates = result.get('candidates', [])
+                                    if not candidates: raise ValueError("无候选项")
+                                    content_parts = candidates[0].get('content', {}).get('parts', [])
+                                    raw_content = content_parts[0].get('text', "") if content_parts else ""
+                                    
+                                    check_results = parse_json_response(raw_content)
+                                    
+                                    status_box.update(label="分析完成", state="complete", expanded=False)
+                                    
+                                    if check_results:
+                                        st.success(f"分析完成！(如未显示来源链接，说明本次使用了离线知识库)")
+                                        
+                                        for item in check_results:
+                                            status = item.get('status', '存疑')
+                                            if "错" in status:
+                                                border_color = "#ff4b4b"
+                                                icon = "❌"
+                                                title_color = "#ff8a80"
+                                            elif "疑" in status or "不一致" in status:
+                                                border_color = "#ffa726"
+                                                icon = "⚠️"
+                                                title_color = "#ffcc80"
+                                            else:
+                                                border_color = "#66bb6a"
+                                                icon = "✅"
+                                                title_color = "#a5d6a7"
+                                            
+                                            with st.container():
+                                                st.markdown(f"""
+                                                <div class="check-card" style="border-left: 5px solid {border_color};">
+                                                    <div style="margin-bottom: 12px;">
+                                                        <span style="font-weight: bold; font-size: 1.3em; color: {title_color};">{icon} {status}</span>
+                                                        <div style="color: #b0bec5; font-size: 0.9em; margin-top: 4px;">陈述：{item.get('claim', '')}</div>
+                                                    </div>
+                                                    <div style="margin-bottom: 15px; line-height: 1.6;">
+                                                        <b>💡 专家分析：</b><br>
+                                                        {item.get('correction', '无详细分析')}
+                                                    </div>
+                                                """, unsafe_allow_html=True)
+                                                
+                                                evidence_list = item.get('evidence_list', [])
+                                                # 兼容性处理
+                                                if not evidence_list and 'evidence_quote' in item:
+                                                    evidence_list = [{'source_name': '权威数据', 'content': item['evidence_quote'], 'url': '#'}]
+
+                                                if evidence_list:
+                                                    st.markdown('<div class="evidence-container">', unsafe_allow_html=True)
+                                                    st.markdown('<div style="color: #555; margin-bottom: 8px; font-weight:bold;">🔍 权威数据/原文证据：</div>', unsafe_allow_html=True)
+                                                    for ev in evidence_list:
+                                                        source_name = ev.get('source_name', '来源')
+                                                        content = ev.get('content', '')
+                                                        url = ev.get('url', '#')
+                                                        st.markdown(f"""
+                                                        <div class="quote-item">
+                                                            <span class="tag-pill">[{source_name}]</span>
+                                                            "{content}"
+                                                            <br>
+                                                            <a href="{url}" target="_blank" class="source-link" style="margin-top:4px; display:inline-block;">🔗 来源</a>
+                                                        </div>
+                                                        """, unsafe_allow_html=True)
+                                                    st.markdown('</div>', unsafe_allow_html=True)
+                                                st.markdown("</div>", unsafe_allow_html=True)
+
+                                    else:
+                                        st.warning("AI 返回的内容无法解析")
+                                        st.markdown(raw_content)
+
+                                except Exception as e:
+                                    status_box.update(label="解析失败", state="error")
+                                    st.error(f"解析错误: {e}")
+                            else:
+                                st.error(f"API 请求失败: {response.status_code}")
+                                st.markdown("**错误详情 (发给管理员):**")
+                                st.code(response.text) # 显示具体错误原因
                     except Exception as e:
                         st.error(f"网络连接错误: {e}")
 
@@ -493,96 +535,101 @@ with tab2:
                     status_box_search.write("🔍 正在连接 Google Scholar & 权威期刊库...")
                     
                     try:
-                        response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload)
+                        # 使用 robust_api_call
+                        response = robust_api_call(api_url, payload, status_box_search)
                         
-                        # --- 400 错误处理与自动降级 ---
-                        if response.status_code == 400:
-                            status_box_search.write("⚠️ 联网搜索遇到兼容性问题，正在尝试切换至离线智能分析模式...")
-                            # 移除 tools 再次尝试
-                            if "tools" in payload:
-                                del payload["tools"]
-                                time.sleep(1) # 稍作停顿
-                                response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload)
+                        if response is None:
+                            status_box_search.update(label="请求超时", state="error")
+                            st.error("API 请求失败，请检查网络。")
+                        else:
+                            # --- 400 错误处理与自动降级 ---
+                            if response.status_code == 400:
+                                status_box_search.write("⚠️ 联网搜索遇到兼容性问题，正在尝试切换至离线智能分析模式...")
+                                # 移除 tools 再次尝试
+                                if "tools" in payload:
+                                    del payload["tools"]
+                                    time.sleep(1) 
+                                    response = robust_api_call(api_url, payload, status_box_search)
 
-                        if response.status_code == 200:
-                            result = response.json()
-                            try:
-                                candidates = result.get('candidates', [])
-                                content_parts = candidates[0].get('content', {}).get('parts', [])
-                                raw_content = content_parts[0].get('text', "") if content_parts else ""
-                                
-                                # 解析 JSON
-                                search_results = parse_json_response(raw_content)
-                                
-                                status_box_search.update(label="检索完成", state="complete", expanded=False)
-                                
-                                if search_results:
-                                    # 处理两种可能的数据结构
-                                    papers = []
-                                    overview = ""
+                            if response.status_code == 200:
+                                result = response.json()
+                                try:
+                                    candidates = result.get('candidates', [])
+                                    content_parts = candidates[0].get('content', {}).get('parts', [])
+                                    raw_content = content_parts[0].get('text', "") if content_parts else ""
                                     
-                                    if isinstance(search_results, dict):
-                                        papers = search_results.get('papers', [])
-                                        overview = search_results.get('overview', "")
-                                    elif isinstance(search_results, list):
-                                        papers = search_results
+                                    # 解析 JSON
+                                    search_results = parse_json_response(raw_content)
                                     
-                                    # --- 1. 展示学术综述 (Overview) ---
-                                    if overview:
-                                        with st.container():
-                                            st.markdown(f"""
-                                            <div class="overview-card">
-                                                <div style="font-size: 1.2em; font-weight: bold; margin-bottom: 10px;">
-                                                    🧪 学术综述 (Overview)
-                                                </div>
-                                                <div style="line-height: 1.6; font-size: 1.0em;">
-                                                    {overview}
-                                                </div>
-                                            </div>
-                                            """, unsafe_allow_html=True)
-
-                                    # --- 2. 展示文献列表 ---
-                                    if papers:
-                                        st.success(f"检索到 {len(papers)} 篇相关高价值文献 (离线模式下可能为 AI 生成)")
+                                    status_box_search.update(label="检索完成", state="complete", expanded=False)
+                                    
+                                    if search_results:
+                                        # 处理两种可能的数据结构
+                                        papers = []
+                                        overview = ""
                                         
-                                        for item in papers:
-                                            title = item.get('title', '未知标题')
-                                            doi = item.get('doi', '')
-                                            url = item.get('url', '#')
-                                            
+                                        if isinstance(search_results, dict):
+                                            papers = search_results.get('papers', [])
+                                            overview = search_results.get('overview', "")
+                                        elif isinstance(search_results, list):
+                                            papers = search_results
+                                        
+                                        # --- 1. 展示学术综述 (Overview) ---
+                                        if overview:
                                             with st.container():
                                                 st.markdown(f"""
-                                                <div class="research-card">
-                                                    <div style="font-size: 1.2em; font-weight: bold; color: #63b3ed; margin-bottom: 5px;">
-                                                        📄 {title}
+                                                <div class="overview-card">
+                                                    <div style="font-size: 1.2em; font-weight: bold; margin-bottom: 10px;">
+                                                        🧪 学术综述 (Overview)
                                                     </div>
-                                                    <div style="font-size: 0.9em; color: #a0aec0; margin-bottom: 15px;">
-                                                        <span style="color: #e2e8f0;">{item.get('authors', '未知作者')}</span> | 
-                                                        <span style="font-style: italic;">{item.get('publication', '未知来源')}</span>, {item.get('year', 'N/A')}
+                                                    <div style="line-height: 1.6; font-size: 1.0em;">
+                                                        {overview}
                                                     </div>
-                                                    <div style="border-top: 1px solid #4a5568; margin-bottom: 10px;"></div>
-                                                    <div style="line-height: 1.6; color: #cbd5e0; font-family: 'Noto Serif SC', serif;">
-                                                        {item.get('summary', '暂无摘要')}
-                                                    </div>
+                                                </div>
                                                 """, unsafe_allow_html=True)
+
+                                        # --- 2. 展示文献列表 ---
+                                        if papers:
+                                            st.success(f"检索到 {len(papers)} 篇相关高价值文献 (离线模式下可能为 AI 生成)")
+                                            
+                                            for item in papers:
+                                                title = item.get('title', '未知标题')
+                                                doi = item.get('doi', '')
+                                                url = item.get('url', '#')
                                                 
-                                                col_links = st.columns([1, 1, 4])
-                                                st.markdown(f'<a href="{url}" target="_blank" class="source-link">🔗 原文/Abstract</a>', unsafe_allow_html=True)
-                                                if doi and len(doi) > 5:
-                                                    scihub_url = f"https://x.sci-hub.org.cn/{doi}"
-                                                    st.markdown(f'<a href="{scihub_url}" target="_blank" class="source-link scihub-btn">🔓 Sci-Hub 下载</a>', unsafe_allow_html=True)
-                                                st.markdown("</div>", unsafe_allow_html=True)
+                                                with st.container():
+                                                    st.markdown(f"""
+                                                    <div class="research-card">
+                                                        <div style="font-size: 1.2em; font-weight: bold; color: #63b3ed; margin-bottom: 5px;">
+                                                            📄 {title}
+                                                        </div>
+                                                        <div style="font-size: 0.9em; color: #a0aec0; margin-bottom: 15px;">
+                                                            <span style="color: #e2e8f0;">{item.get('authors', '未知作者')}</span> | 
+                                                            <span style="font-style: italic;">{item.get('publication', '未知来源')}</span>, {item.get('year', 'N/A')}
+                                                        </div>
+                                                        <div style="border-top: 1px solid #4a5568; margin-bottom: 10px;"></div>
+                                                        <div style="line-height: 1.6; color: #cbd5e0; font-family: 'Noto Serif SC', serif;">
+                                                            {item.get('summary', '暂无摘要')}
+                                                        </div>
+                                                    """, unsafe_allow_html=True)
+                                                    
+                                                    col_links = st.columns([1, 1, 4])
+                                                    st.markdown(f'<a href="{url}" target="_blank" class="source-link">🔗 原文/Abstract</a>', unsafe_allow_html=True)
+                                                    if doi and len(doi) > 5:
+                                                        scihub_url = f"https://x.sci-hub.org.cn/{doi}"
+                                                        st.markdown(f'<a href="{scihub_url}" target="_blank" class="source-link scihub-btn">🔓 Sci-Hub 下载</a>', unsafe_allow_html=True)
+                                                    st.markdown("</div>", unsafe_allow_html=True)
+                                        else:
+                                            st.warning("未找到具体的文献列表，但已生成综述。")
                                     else:
-                                        st.warning("未找到具体的文献列表，但已生成综述。")
-                                else:
-                                    st.warning("未能解析搜索结果")
-                                    st.markdown(raw_content)
-                            except Exception as e:
-                                st.error(f"解析错误: {e}")
-                        else:
-                            st.error(f"请求失败: {response.status_code}")
-                            st.markdown("**错误详情 (发给管理员):**")
-                            st.code(response.text)
+                                        st.warning("未能解析搜索结果")
+                                        st.markdown(raw_content)
+                                except Exception as e:
+                                    st.error(f"解析错误: {e}")
+                            else:
+                                st.error(f"请求失败: {response.status_code}")
+                                st.markdown("**错误详情 (发给管理员):**")
+                                st.code(response.text)
                     except Exception as e:
                         st.error(f"网络错误: {e}")
 
@@ -658,48 +705,54 @@ with tab3:
                     }
 
                     try:
-                        response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload)
-                        if response.status_code == 200:
-                            result = response.json()
-                            candidates = result.get('candidates', [])
-                            content_parts = candidates[0].get('content', {}).get('parts', [])
-                            full_text = content_parts[0].get('text', "") if content_parts else ""
-                            
-                            status_box_rewrite.update(label="润色完成", state="complete", expanded=False)
-                            
-                            if full_text:
-                                # 解析 [REWRITE] 和 [TRANSLATION]
-                                rewrite_content = full_text
-                                translation_content = ""
-                                
-                                if "[REWRITE]" in full_text and "[TRANSLATION]" in full_text:
-                                    parts = full_text.split("[TRANSLATION]")
-                                    rewrite_part = parts[0].replace("[REWRITE]", "").strip()
-                                    translation_part = parts[1].strip()
-                                    
-                                    rewrite_content = rewrite_part
-                                    translation_content = translation_part
-                                else:
-                                    # Fallback
-                                    rewrite_content = full_text.replace("[REWRITE]", "").replace("[TRANSLATION]", "")
-
-                                translation_html = ""
-                                if translation_content:
-                                    translation_html = f"""<div class="translation-section"><div style="margin-bottom: 8px; font-weight: bold;">🌐 Translation:</div>{translation_content.replace(chr(10), '<br>')}</div>"""
-
-                                st.markdown(f"""
-                                <div class="rewrite-card">
-                                    <div style="margin-bottom: 10px; font-weight: bold; color: #81e6d9;">🖋️ Revised Text:</div>
-                                    {rewrite_content.replace(chr(10), '<br>')}
-                                    {translation_html}
-                                </div>
-                                """, unsafe_allow_html=True)
-                                
-                            else:
-                                st.error("生成内容为空，请重试。")
+                        # 使用 robust_api_call
+                        response = robust_api_call(api_url, payload, status_box_rewrite)
+                        
+                        if response is None:
+                            status_box_rewrite.update(label="请求超时", state="error")
+                            st.error("API 请求失败，请检查网络。")
                         else:
-                            st.error(f"API 请求失败: {response.status_code}")
-                            st.markdown("**错误详情 (发给管理员):**")
-                            st.code(response.text)
+                            if response.status_code == 200:
+                                result = response.json()
+                                candidates = result.get('candidates', [])
+                                content_parts = candidates[0].get('content', {}).get('parts', [])
+                                full_text = content_parts[0].get('text', "") if content_parts else ""
+                                
+                                status_box_rewrite.update(label="润色完成", state="complete", expanded=False)
+                                
+                                if full_text:
+                                    # 解析 [REWRITE] 和 [TRANSLATION]
+                                    rewrite_content = full_text
+                                    translation_content = ""
+                                    
+                                    if "[REWRITE]" in full_text and "[TRANSLATION]" in full_text:
+                                        parts = full_text.split("[TRANSLATION]")
+                                        rewrite_part = parts[0].replace("[REWRITE]", "").strip()
+                                        translation_part = parts[1].strip()
+                                        
+                                        rewrite_content = rewrite_part
+                                        translation_content = translation_part
+                                    else:
+                                        # Fallback
+                                        rewrite_content = full_text.replace("[REWRITE]", "").replace("[TRANSLATION]", "")
+
+                                    translation_html = ""
+                                    if translation_content:
+                                        translation_html = f"""<div class="translation-section"><div style="margin-bottom: 8px; font-weight: bold;">🌐 Translation:</div>{translation_content.replace(chr(10), '<br>')}</div>"""
+
+                                    st.markdown(f"""
+                                    <div class="rewrite-card">
+                                        <div style="margin-bottom: 10px; font-weight: bold; color: #81e6d9;">🖋️ Revised Text:</div>
+                                        {rewrite_content.replace(chr(10), '<br>')}
+                                        {translation_html}
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                    
+                                else:
+                                    st.error("生成内容为空，请重试。")
+                            else:
+                                st.error(f"API 请求失败: {response.status_code}")
+                                st.markdown("**错误详情 (发给管理员):**")
+                                st.code(response.text)
                     except Exception as e:
                         st.error(f"连接错误: {e}")
