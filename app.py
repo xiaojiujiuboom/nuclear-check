@@ -172,18 +172,19 @@ def get_available_model(api_key):
         
         if not model_names: return None, "未找到任何可用模型"
 
-        # 优先级匹配逻辑
+        # 优先级匹配逻辑 (更新为最新模型)
         preferred_order = [
-            'gemini-3.0-flash',
-            'gemini-2.5-flash',
+            'gemini-2.5-flash-preview', # 最新预览版
+            'gemini-2.0-flash-exp',     # 实验版 (俗称的下一代)
+            'gemini-2.0-flash',
             'gemini-1.5-flash',
-            'gemini-1.5-flash-latest',
             'gemini-1.5-pro'
         ]
 
         selected_model = None
         for pref in preferred_order:
             for available_model in model_names:
+                # 模糊匹配模型名称
                 if pref in available_model: 
                     selected_model = available_model
                     break
@@ -200,20 +201,26 @@ def get_available_model(api_key):
 # --- 5. 辅助函数：解析 AI 返回的 JSON ---
 def parse_json_response(text):
     """
-    增强版解析器：支持解析 列表[] 和 对象{}
+    增强版解析器：
+    1. 优先尝试直接 JSON.loads (对应 Native JSON Mode)
+    2. 其次尝试去除 Markdown 标记
+    3. 最后尝试提取 { ... } 或 [ ... ]
     """
     try:
-        # 清理 Markdown 标记
-        text = re.sub(r'```json\s*', '', text)
-        text = re.sub(r'```\s*$', '', text)
-        text = text.strip()
-        
-        # 尝试直接解析
+        # 1. 尝试直接解析 (适用于 Native JSON Mode 返回的纯净数据)
         return json.loads(text)
+    except:
+        pass
+
+    try:
+        # 2. 清理 Markdown 标记
+        clean_text = re.sub(r'```json\s*', '', text)
+        clean_text = re.sub(r'```\s*$', '', clean_text)
+        clean_text = clean_text.strip()
+        return json.loads(clean_text)
     except Exception:
-        # 如果直接解析失败，尝试提取 {} 或 [] 区间
+        # 3. 尝试提取 {} 或 [] 区间
         try:
-            # 找最外层的括号
             start_obj = text.find('{')
             start_list = text.find('[')
             
@@ -235,10 +242,10 @@ with st.sidebar:
     st.title("⚛️ Nuclear Hub")
     st.info(
         """
-        **版本**: Pro Max v2.7 (Patch)
+        **版本**: Pro Max v2.8 (Stable)
         
-        本平台集成了 Google Gemini 3.0 Flash 模型，
-        具备实时联网核查、深度学术检索与高级学术改写能力。
+        本平台优先接入 **Gemini 2.5 Flash / 2.0 Flash**，
+        并启用了 **Native JSON Mode** 以确保检索稳定性。
         """
     )
     st.caption("Powered by Google Gemini & Streamlit")
@@ -246,7 +253,7 @@ with st.sidebar:
 st.title("Nuclear Knowledge Hub")
 st.caption("🚀 核科学事实核查、学术检索与专业改写平台")
 
-# 创建三个独立的 Tabs (新增 "学术改写")
+# 创建三个独立的 Tabs
 tab1, tab2, tab3 = st.tabs(["🔍 智能核查 (Check)", "🔬 学术检索 (Search)", "✍️ 学术改写 (Rewrite)"])
 
 # ==========================================
@@ -278,7 +285,7 @@ with tab1:
                     if not model_name.startswith("models/"): model_name = f"models/{model_name}"
                     api_url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
                     
-                    # --- 核查 Prompt (已更新：强制翻译证据) ---
+                    # --- 核查 Prompt ---
                     prompt_check = f"""
                     你是一个严谨的核聚变与等离子体物理专家，同时拥有实时联网核查的能力。
                     请利用 Google Search 工具，核查以下文本中的每一个事实陈述。
@@ -309,9 +316,13 @@ with tab1:
                     }}
                     """
                     
+                    # 启用 Native JSON Mode
                     payload = {
                         "contents": [{"parts": [{ "text": prompt_check }]}],
-                        "tools": [{"google_search": {}}]
+                        "tools": [{"google_search": {}}],
+                        "generationConfig": {
+                            "responseMimeType": "application/json"
+                        }
                     }
                     
                     status_box.write("🔍 正在联网检索最新数据...")
@@ -327,6 +338,7 @@ with tab1:
                                 content_parts = candidates[0].get('content', {}).get('parts', [])
                                 raw_content = content_parts[0].get('text', "") if content_parts else ""
                                 
+                                # 使用增强版解析器
                                 check_results = parse_json_response(raw_content)
                                 
                                 status_box.update(label="深度核查完成", state="complete", expanded=False)
@@ -363,6 +375,7 @@ with tab1:
                                             """, unsafe_allow_html=True)
                                             
                                             evidence_list = item.get('evidence_list', [])
+                                            # 兼容性处理
                                             if not evidence_list and 'evidence_quote' in item:
                                                 evidence_list = [{'source_name': '权威数据', 'content': item['evidence_quote'], 'url': '#'}]
 
@@ -421,7 +434,7 @@ with tab2:
                     if not model_name.startswith("models/"): model_name = f"models/{model_name}"
                     api_url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
                     
-                    # --- 学术检索 Prompt (已更新：包含Overview和双语摘要) ---
+                    # --- 学术检索 Prompt ---
                     prompt_search = f"""
                     你是一位资深的核科学研究员。请利用 Google Search 为用户寻找**真实存在**的学术文献。
                     
@@ -458,9 +471,13 @@ with tab2:
                     }}
                     """
                     
+                    # 启用 Native JSON Mode - 这是解决"未能解析"的关键
                     payload = {
                         "contents": [{"parts": [{ "text": prompt_search }]}],
-                        "tools": [{"google_search": {}}]
+                        "tools": [{"google_search": {}}],
+                        "generationConfig": {
+                            "responseMimeType": "application/json"
+                        }
                     }
                     
                     status_box_search.write("🔍 正在连接 Google Scholar & 权威期刊库...")
@@ -474,12 +491,13 @@ with tab2:
                                 content_parts = candidates[0].get('content', {}).get('parts', [])
                                 raw_content = content_parts[0].get('text', "") if content_parts else ""
                                 
+                                # 解析 JSON
                                 search_results = parse_json_response(raw_content)
                                 
                                 status_box_search.update(label="检索完成", state="complete", expanded=False)
                                 
                                 if search_results:
-                                    # 处理两种可能的数据结构：旧版(List) 和 新版(Dict)
+                                    # 处理两种可能的数据结构
                                     papers = []
                                     overview = ""
                                     
@@ -547,7 +565,7 @@ with tab2:
                         st.error(f"网络错误: {e}")
 
 # ==========================================
-# 模块三：学术改写 (Academic Rewrite) - 新增
+# 模块三：学术改写 (Academic Rewrite)
 # ==========================================
 with tab3:
     col1_rewrite, col2_rewrite = st.columns([1, 1], gap="large")
@@ -577,7 +595,7 @@ with tab3:
                     
                     api_url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
 
-                    # --- 升级版学术改写 Prompt ---
+                    # --- 升级版学术改写 Prompt (保持文本模式，不强制JSON) ---
                     prompt_rewrite = f"""
                     你是一位在高级核杂质期刊有丰富经验的**人类学术编辑**。
                     请对以下文本进行**彻底的去AI化（De-AI）改写**，并提供双语对照。
@@ -597,12 +615,11 @@ with tab3:
                         -   如果改写后的正文是**英文**，必须在下方附上高水平的**中文翻译**。
                         -   如果改写后的正文是**中文**，必须在下方附上地道的**英文翻译**。
                         -   翻译也要符合上述的学术标准，不要直译。
+                    
                     **✅可以参考学习模仿以下写作风格：**
-                     1.  "Direct drive means conducting electrons as the energy to create a reaction, usually in the form of laser beams, and directly hitting the fuel pellet and indirectly hitting the capsule around the pellet, with those laser beams. Indirect drive means turning laser light frequencies into x-ray beams, to heat the capsule in a less intense and pressuring way with a similar amount of heat⁸. Because indirect drive is essentially very similar to direct drive and has not actually been tested in a reactor, when mentioning ICF in the article, it will be generally referring to direct drive.
-
-Both main kinds of fusion (ICF and MCF) have their pros and cons. Each is incredibly unique and is hard to compare because the process of achieving a fusion reaction is so different. To understand ICF and MCF better, it’s important to know how they work."                                                                                                                                            
-                     2.   "In this work, we present the results of an experiment aiming at proton acceleration using a focus with a homogeneous intensity distribution, called smoothed focus. To achieve this goal, we implemented a phase plate before the pre-amplifier of the Petawatt High-Energy Laser for Heavy Ion EXperiments laser facility. The phase plate was used for the first time at a high-power short-pulse laser. Demonstrating a low divergent ion beam was the main goal ofthis work. Numerical simulations using the particle-in-cell code Extendable PIC Open Collaboration estimated a 2–5 times reduction in the angular divergence of the proton beam using a phase plate due to a smoother sheath at the rear side of the target. However, the reduction in the angular divergence was not sensible according to the experimental data. A positive point is that the spectrum of protons that are generated with the smoothed beam is shifted toward lower energies, provided that the laser absorption is kept in check, compared to the Gaussian proton spectrum. Moreover, the number ofprotons that are generated with the smoothed beam is higher than the ones generated with the Gaussian beam."                                                                                                                                          
-                     3.   "The interaction of ultraintense laser pulses with solids is largely affected by the plasma gradient at the vacuum–solid interface, which modifies the absorption and ultimately, controls the energy distribution function of heated electrons. A micrometer scale-length plasma has been predicted to yield a significant enhancement of the energy and weight of the fast electron population and to play a major role in laser-driven proton acceleration with thin foils. We report on recent experimental results on proton acceleration from laser interaction with foil targets at ultra-relativistic intensities. We show a threefold increase of the proton cut-off energy when a micrometer scale-length pre-plasma is introduced by irradiation with a low energy femtosecond pre-pulse. Our realistic numerical simulations agree with the observed gain of the proton cut-off energy and confirm the role of stochastic heating of fast electrons in the enhancement of the accelerating sheath field."                                                                                                                                           
+                     1.  "Direct drive means conducting electrons as the energy to create a reaction, usually in the form of laser beams..." (简洁直接的定义)
+                     2.  "In this work, we present the results of an experiment aiming at proton acceleration using a focus with a homogeneous intensity distribution..." (清晰的实验叙述)
+                     3.  "The interaction of ultraintense laser pulses with solids is largely affected by the plasma gradient..." (因果逻辑清晰)
 
                     **输出格式（必须严格遵守）：**
                     请按以下标签分隔内容：
@@ -616,6 +633,7 @@ Both main kinds of fusion (ICF and MCF) have their pros and cons. Each is incred
 
                     payload = {
                         "contents": [{"parts": [{ "text": prompt_rewrite }]}]
+                        # 注意：此处不开启 JSON 模式，因为我们需要特定格式的文本块
                     }
 
                     try:
@@ -641,11 +659,9 @@ Both main kinds of fusion (ICF and MCF) have their pros and cons. Each is incred
                                     rewrite_content = rewrite_part
                                     translation_content = translation_part
                                 else:
-                                    # Fallback: 如果AI没按格式输出，尝试简单清洗
+                                    # Fallback
                                     rewrite_content = full_text.replace("[REWRITE]", "").replace("[TRANSLATION]", "")
 
-                                # 构建 HTML 内容，避免缩进导致的 Markdown 代码块渲染问题
-                                # 使用 compact string 避免产生空格缩进
                                 translation_html = ""
                                 if translation_content:
                                     translation_html = f"""<div class="translation-section"><div style="margin-bottom: 8px; font-weight: bold;">🌐 Translation:</div>{translation_content.replace(chr(10), '<br>')}</div>"""
