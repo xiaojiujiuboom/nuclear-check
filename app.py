@@ -545,22 +545,24 @@ with tab2:
                 if model_list:
                     # --- 恢复完整的 Prompt ---
                     prompt_search = f"""
-                    你是一位资深的核科学研究员。请利用 Google Search 为用户寻找**真实存在**的学术文献。
+                    你是一位资深的核科学研究员。请利用 Google Search 为用户寻找**真实存在**的权威学术文献、官方技术报告、行业白皮书或权威数据库记录。
 
                     **用户课题：** "{search_query}"
 
                     **任务 (两部分)：**
-                    1. **Overview (综述)**: 基于搜索到的所有文献，用中文写一段 150 字左右的学术综述，总结该领域的最新进展或回答用户问题。
-                    2. **Papers (文献列表)**: 列出具体的文献。
+                    1. **Overview (综述)**: 基于搜索到的所有文献或数据库或相关官方报道，用中文写一段 150 字左右的学术综述，总结该领域的最新进展或回答用户问题。
+                    2. **Papers (文献列表)**: 列出具体的文献、报告或数据库条目。
 
                     **严厉禁止 (Anti-Hallucination)：**
-                    1. **严禁编造**论文标题、作者、期刊或链接。
-                    2. 如果没有PDF链接或DOI，请留空。
+                    1. 严禁编造标题、作者、发布机构、报告编号、期刊或链接。
+                    2. 严格区分“新闻报道”与“原始报告/论文”，优先引用原始出处
+                    3. 如果没有 PDF 链接、DOI 或官方归档页面，请留空。
+                        
 
                     **执行步骤：**
-                    1. 搜索 Nature, Science, IAEA, ITER, PRL 等来源。
-                    2. 提取信息，确保链接真实。
-                    3. 编写综述。
+                    1. 搜索 Nature, Science等期刊, IAEA (国际原子能机构), OECD-NEA (核能署), ITER, DOE (美国能源部), WNA (世界核协会) 等官方渠道等来源。
+                    2. 提取关键数据，确保来源链接真实有效且可访问。
+                    3. 编写综述，按学术规范整理输出。
 
                     **输出格式要求（非常重要）：**
                     **严禁输出任何开场白（如"好的"、"我找到了"等）。**
@@ -610,7 +612,7 @@ with tab2:
                     st.markdown(f"""<div class="overview-card"><div style="font-size: 1.2em; font-weight: bold; margin-bottom: 10px;">🧪 学术综述 (Overview)</div><div style="line-height: 1.6;">{overview}</div></div>""", unsafe_allow_html=True)
 
                 if papers:
-                    st.success(f"检索到 {len(papers)} 篇相关文献")
+                    st.success(f"检索到 {len(papers)} 篇相关文献或报道")
                     for item in papers:
                         with st.container():
                             st.markdown(f"""
