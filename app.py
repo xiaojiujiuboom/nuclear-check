@@ -122,7 +122,7 @@ st.markdown("""
             margin-top: 1.5rem;
             padding-top: 1.5rem;
             border-top: 1px dashed #4fd1c5;
-            color: #b2f5ea;
+            color: #333333;
             font-size: 0.95rem;
             font-style: italic;
         }
