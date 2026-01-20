@@ -164,7 +164,8 @@ def get_prioritized_models(api_key):
     策略：优先使用稳定且配额高的 1.5-flash，其次是 2.0/2.5 等预览版。
     """
     if not api_key: return [], "API Key 未配置"
-    url = f"[https://generativelanguage.googleapis.com/v1beta/models?key=](https://generativelanguage.googleapis.com/v1beta/models?key=){api_key}"
+    # 修复 URL 格式错误
+    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
     try:
         response = requests.get(url)
         if response.status_code != 200:
@@ -222,7 +223,8 @@ def smart_api_call(model_list, payload, api_key, status_box=None):
         else:
             full_model_name = model_name
             
-        api_url = f"[https://generativelanguage.googleapis.com/v1beta/](https://generativelanguage.googleapis.com/v1beta/){full_model_name}:generateContent?key={api_key}"
+        # 修复 URL 格式错误
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/{full_model_name}:generateContent?key={api_key}"
         
         if status_box:
             status_box.write(f"🔄 正在尝试模型节点 ({i+1}/{len(model_list)}): `{model_name.replace('models/', '')}` ...")
@@ -335,11 +337,10 @@ with st.sidebar:
     st.title("⚛️ Nuclear Hub")
     st.info(
         """
-        **版本**: Pro Max v3.5 (Parsing Guard)
+        **版本**: Pro Max v3.6 (Fixed)
         
-        **智能解析增强**：
-        新增了对非标准 JSON 格式的自动修复与清洗能力。
-        检索范围：Google 全网公开学术资源。
+        **修复完成**：
+        修复了 API URL 格式错误导致的“无可用模型”问题。
         """
     )
     st.caption("Powered by Google Gemini & Streamlit")
@@ -522,7 +523,7 @@ with tab2:
                 st.error("🔒 请在侧边栏输入 API Key")
             else:
                 status_box_search = st.status("正在进行深度学术检索...", expanded=True)
-                model_list, _ = get_prioritized_models(API_KEY)
+                model_list, msg = get_prioritized_models(API_KEY)
                 
                 if model_list:
                     prompt_search = f"""
@@ -627,7 +628,7 @@ with tab2:
                                             col_links = st.columns([1, 1, 4])
                                             st.markdown(f'<a href="{url}" target="_blank" class="source-link">🔗 原文/Abstract</a>', unsafe_allow_html=True)
                                             if doi and len(doi) > 5:
-                                                scihub_url = f"[https://x.sci-hub.org.cn/](https://x.sci-hub.org.cn/){doi}"
+                                                scihub_url = f"https://x.sci-hub.org.cn/{doi}"
                                                 st.markdown(f'<a href="{scihub_url}" target="_blank" class="source-link scihub-btn">🔓 Sci-Hub 下载</a>', unsafe_allow_html=True)
                                             st.markdown("</div>", unsafe_allow_html=True)
                                 else:
@@ -645,7 +646,7 @@ with tab2:
                     else:
                         st.error("所有模型请求均失败，请检查配额或稍后再试。")
                 else:
-                    st.error("无可用模型")
+                    st.error(f"无可用模型: {msg}")
 
 # ==========================================
 # 模块三：学术改写 (Academic Rewrite)
@@ -671,7 +672,7 @@ with tab3:
                 st.error("🔒 请在侧边栏输入 API Key")
             else:
                 status_box_rewrite = st.status("正在进行语言润色与逻辑重构...", expanded=True)
-                model_list, _ = get_prioritized_models(API_KEY)
+                model_list, msg = get_prioritized_models(API_KEY)
                 
                 if model_list:
                     # --- 升级版学术改写 Prompt ---
@@ -757,4 +758,4 @@ with tab3:
                         st.error(f"API 请求失败: {response.status_code if response else 'TimeOut'}")
                         if response: st.code(response.text)
                 else:
-                    st.error("无可用模型")
+                    st.error(f"无可用模型: {msg}")
