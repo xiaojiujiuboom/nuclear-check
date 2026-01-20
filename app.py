@@ -4,6 +4,7 @@ import json
 import re
 import time
 import ast # 新增：用于处理类 Python 字典格式
+import datetime # 新增：用于记录收藏时间
 
 # --- 1. 页面配置 (必须在最前面) ---
 st.set_page_config(
@@ -12,6 +13,18 @@ st.set_page_config(
     page_icon="⚛️",
     initial_sidebar_state="expanded"
 )
+
+# --- 初始化 Session State (用于状态保持和收藏夹) ---
+if "favorites" not in st.session_state:
+    st.session_state["favorites"] = []
+
+# 用于保持各板块的结果，防止点击按钮后结果消失
+if "check_result" not in st.session_state:
+    st.session_state["check_result"] = None
+if "search_result" not in st.session_state:
+    st.session_state["search_result"] = None
+if "rewrite_result" not in st.session_state:
+    st.session_state["rewrite_result"] = None
 
 # --- 2. 获取 API Key (双重保险模式) ---
 try:
@@ -82,6 +95,16 @@ st.markdown("""
             line-height: 1.8;
             font-size: 1.05rem;
             box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        
+        /* 收藏卡片样式 */
+        .fav-card {
+            border: 1px solid #d69e2e;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            background-color: #2b2518;
+            color: #ecc94b;
         }
         
         /* 翻译部分样式 */
@@ -223,7 +246,6 @@ def smart_api_call(model_list, payload, api_key, status_box=None):
         else:
             full_model_name = model_name
             
-        # 修复 URL 格式错误
         api_url = f"https://generativelanguage.googleapis.com/v1beta/{full_model_name}:generateContent?key={api_key}"
         
         if status_box:
@@ -331,16 +353,41 @@ def parse_json_response(text):
 
     return None
 
+# --- 新增：收藏功能函数 ---
+def add_to_favorites(category, title, content_data):
+    """
+    category: 'Check' | 'Search' | 'Rewrite'
+    title: 简短标题
+    content_data: 完整数据 (JSON或文本)
+    """
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    item = {
+        "id": f"{category}_{int(time.time()*1000)}",
+        "category": category,
+        "title": title,
+        "content": content_data,
+        "time": timestamp
+    }
+    st.session_state["favorites"].append(item)
+    st.toast(f"✅ 已收藏到【我的收藏】: {title}", icon="⭐")
+
+def delete_favorite(index):
+    if 0 <= index < len(st.session_state["favorites"]):
+        del st.session_state["favorites"][index]
+        st.rerun()
+
 # --- 7. 核心页面逻辑 ---
 # 侧边栏
 with st.sidebar:
     st.title("⚛️ Nuclear Hub")
     st.info(
         """
-        **版本**: Pro Max v3.6 (Fixed)
+        **版本**: Pro Max v4.1 (Restore)
         
-        **修复完成**：
-        修复了 API URL 格式错误导致的“无可用模型”问题。
+        **功能恢复与升级**：
+        1. 完整恢复了深度指令 Prompt (V3.x)。
+        2. 增加了收藏夹功能 (V4.0)。
+        3. 保留了智能轮询与容错解析。
         """
     )
     st.caption("Powered by Google Gemini & Streamlit")
@@ -348,8 +395,8 @@ with st.sidebar:
 st.title("Nuclear Knowledge Hub")
 st.caption("🚀 核科学事实核查、学术检索与专业改写平台")
 
-# 创建三个独立的 Tabs
-tab1, tab2, tab3 = st.tabs(["🔍 智能核查 (Check)", "🔬 学术检索 (Search)", "✍️ 学术改写 (Rewrite)"])
+# 创建四个独立的 Tabs
+tab1, tab2, tab3, tab4 = st.tabs(["🔍 智能核查", "🔬 学术检索", "✍️ 学术改写", "⭐ 我的收藏"])
 
 # ==========================================
 # 模块一：智能核查 (Nuclear Check)
@@ -364,19 +411,20 @@ with tab1:
 
     with col2_check:
         st.markdown("#### 📊 核查报告")
+        
+        # 1. 触发逻辑
         if check_btn and user_text_check:
             if not API_KEY:
                 st.error("🔒 请在侧边栏输入 API Key")
             else:
                 status_box = st.status("正在启动多模型引擎...", expanded=True)
-                
-                # 获取模型列表
                 model_list, msg = get_prioritized_models(API_KEY)
                 
                 if not model_list:
                     status_box.update(label="初始化失败", state="error")
                     st.error(f"无法获取模型列表: {msg}")
                 else:
+                    # --- 恢复完整的 Prompt ---
                     prompt_check = f"""
                     你是一个严谨的核聚变与等离子体物理专家，同时拥有实时联网核查的能力。
                     请利用 Google Search 工具，核查以下文本中的每一个事实陈述。
@@ -412,97 +460,66 @@ with tab1:
                     ]
                     """
                     
-                    payload = {
-                        "contents": [{"parts": [{ "text": prompt_check }]}],
-                        "tools": [{"google_search": {}}]
-                    }
-                    
-                    # 使用智能轮叫
+                    payload = {"contents": [{"parts": [{ "text": prompt_check }]}], "tools": [{"google_search": {}}]}
                     response = smart_api_call(model_list, payload, API_KEY, status_box)
                     
-                    if response is None:
-                        status_box.update(label="请求超时", state="error")
-                        st.error("所有模型均无响应，请检查网络。")
-                    elif response.status_code == 200:
-                        result = response.json()
-                        try:
-                            candidates = result.get('candidates', [])
-                            if not candidates: raise ValueError("无候选项")
-                            content_parts = candidates[0].get('content', {}).get('parts', [])
-                            raw_content = content_parts[0].get('text', "") if content_parts else ""
-                            
-                            check_results = parse_json_response(raw_content)
-                            
-                            status_box.update(label="分析完成", state="complete", expanded=False)
-                            
-                            if check_results:
-                                st.success(f"分析完成！")
-                                
-                                for item in check_results:
-                                    status = item.get('status', '存疑')
-                                    if "错" in status:
-                                        border_color = "#ff4b4b"
-                                        icon = "❌"
-                                        title_color = "#ff8a80"
-                                    elif "疑" in status or "不一致" in status:
-                                        border_color = "#ffa726"
-                                        icon = "⚠️"
-                                        title_color = "#ffcc80"
-                                    else:
-                                        border_color = "#66bb6a"
-                                        icon = "✅"
-                                        title_color = "#a5d6a7"
-                                    
-                                    with st.container():
-                                        st.markdown(f"""
-                                        <div class="check-card" style="border-left: 5px solid {border_color};">
-                                            <div style="margin-bottom: 12px;">
-                                                <span style="font-weight: bold; font-size: 1.3em; color: {title_color};">{icon} {status}</span>
-                                                <div style="color: #b0bec5; font-size: 0.9em; margin-top: 4px;">陈述：{item.get('claim', '')}</div>
-                                            </div>
-                                            <div style="margin-bottom: 15px; line-height: 1.6;">
-                                                <b>💡 专家分析：</b><br>
-                                                {item.get('correction', '无详细分析')}
-                                            </div>
-                                        """, unsafe_allow_html=True)
-                                        
-                                        evidence_list = item.get('evidence_list', [])
-                                        if not evidence_list and 'evidence_quote' in item:
-                                            evidence_list = [{'source_name': '权威数据', 'content': item['evidence_quote'], 'url': '#'}]
-
-                                        if evidence_list:
-                                            st.markdown('<div class="evidence-container">', unsafe_allow_html=True)
-                                            st.markdown('<div style="color: #555; margin-bottom: 8px; font-weight:bold;">🔍 权威数据/原文证据：</div>', unsafe_allow_html=True)
-                                            for ev in evidence_list:
-                                                source_name = ev.get('source_name', '来源')
-                                                content = ev.get('content', '')
-                                                url = ev.get('url', '#')
-                                                st.markdown(f"""
-                                                <div class="quote-item">
-                                                    <span class="tag-pill">[{source_name}]</span>
-                                                    "{content}"
-                                                    <br>
-                                                    <a href="{url}" target="_blank" class="source-link" style="margin-top:4px; display:inline-block;">🔗 来源</a>
-                                                </div>
-                                                """, unsafe_allow_html=True)
-                                            st.markdown('</div>', unsafe_allow_html=True)
-                                        st.markdown("</div>", unsafe_allow_html=True)
-
-                            else:
-                                # 兜底显示：如果解析失败，直接显示原文
-                                st.warning("内容包含复杂格式，已为您展示原始分析结果：")
-                                st.markdown(f"""
-                                <div class="check-card" style="white-space: pre-wrap;">
-                                {raw_content}
-                                </div>
-                                """, unsafe_allow_html=True)
-
-                        except Exception as e:
-                            status_box.update(label="解析失败", state="error")
-                            st.error(f"解析错误: {e}")
+                    if response and response.status_code == 200:
+                        raw_content = response.json().get('candidates', [])[0].get('content', {}).get('parts', [])[0].get('text', "")
+                        check_results = parse_json_response(raw_content)
+                        status_box.update(label="分析完成", state="complete", expanded=False)
+                        
+                        st.session_state["check_result"] = {"data": check_results, "raw": raw_content, "query": user_text_check[:20]+"..."}
                     else:
-                        st.error(f"最终请求失败: {response.status_code}")
-                        st.code(response.text)
+                        st.error("请求失败，请重试")
+
+        # 2. 显示逻辑
+        if st.session_state.get("check_result"):
+            res_data = st.session_state["check_result"].get("data")
+            raw_text = st.session_state["check_result"].get("raw")
+            
+            col_act1, col_act2 = st.columns([1, 4])
+            with col_act1:
+                if st.button("❤️ 收藏报告", key="fav_btn_check"):
+                    add_to_favorites("Check", st.session_state["check_result"]["query"], st.session_state["check_result"])
+            st.divider()
+
+            if res_data:
+                for item in res_data:
+                    status = item.get('status', '存疑')
+                    if "错" in status:
+                        border_color = "#ff4b4b"; icon = "❌"; title_color = "#ff8a80"
+                    elif "疑" in status or "不一致" in status:
+                        border_color = "#ffa726"; icon = "⚠️"; title_color = "#ffcc80"
+                    else:
+                        border_color = "#66bb6a"; icon = "✅"; title_color = "#a5d6a7"
+                    
+                    with st.container():
+                        st.markdown(f"""
+                        <div class="check-card" style="border-left: 5px solid {border_color};">
+                            <div style="margin-bottom: 12px;">
+                                <span style="font-weight: bold; font-size: 1.3em; color: {title_color};">{icon} {status}</span>
+                                <div style="color: #b0bec5; font-size: 0.9em; margin-top: 4px;">陈述：{item.get('claim', '')}</div>
+                            </div>
+                            <div style="margin-bottom: 15px; line-height: 1.6;">
+                                <b>💡 专家分析：</b><br>{item.get('correction', '无详细分析')}
+                            </div>
+                        """, unsafe_allow_html=True)
+                        
+                        evidence_list = item.get('evidence_list', [])
+                        if not evidence_list and 'evidence_quote' in item: evidence_list = [{'source_name': '权威数据', 'content': item['evidence_quote'], 'url': '#'}]
+                        if evidence_list:
+                            st.markdown('<div class="evidence-container">', unsafe_allow_html=True)
+                            st.markdown('<div style="color: #555; margin-bottom: 8px; font-weight:bold;">🔍 权威数据/原文证据：</div>', unsafe_allow_html=True)
+                            for ev in evidence_list:
+                                st.markdown(f"""
+                                <div class="quote-item"><span class="tag-pill">[{ev.get('source_name', '来源')}]</span>"{ev.get('content', '')}"<br>
+                                <a href="{ev.get('url', '#')}" target="_blank" class="source-link" style="margin-top:4px; display:inline-block;">🔗 来源</a></div>
+                                """, unsafe_allow_html=True)
+                            st.markdown('</div>', unsafe_allow_html=True)
+                        st.markdown("</div>", unsafe_allow_html=True)
+            else:
+                st.warning("原始结果展示：")
+                st.markdown(raw_text)
 
 # ==========================================
 # 模块二：学术检索 (Nuclear Search)
@@ -513,37 +530,38 @@ with tab2:
     with col1_search:
         st.markdown("#### 🔍 学术搜索引擎")
         search_query = st.text_input("请输入研究课题、关键词或问题", label_visibility="collapsed", placeholder="例如：可控核聚变 2024年 突破性进展 Q值", key="input_search")
-        st.caption("支持中英文输入。系统将自动检索数据库。")
         search_btn = st.button("🔬 开始学术检索", type="primary", use_container_width=True, key="btn_search")
 
     with col2_search:
         st.markdown("#### 📚 检索结果")
+        
         if search_btn and search_query:
             if not API_KEY:
                 st.error("🔒 请在侧边栏输入 API Key")
             else:
                 status_box_search = st.status("正在进行深度学术检索...", expanded=True)
-                model_list, msg = get_prioritized_models(API_KEY)
+                model_list, _ = get_prioritized_models(API_KEY)
                 
                 if model_list:
+                    # --- 恢复完整的 Prompt ---
                     prompt_search = f"""
                     你是一位资深的核科学研究员。请利用 Google Search 为用户寻找**真实存在**的学术文献。
-                    
+
                     **用户课题：** "{search_query}"
-                    
+
                     **任务 (两部分)：**
                     1. **Overview (综述)**: 基于搜索到的所有文献，用中文写一段 150 字左右的学术综述，总结该领域的最新进展或回答用户问题。
                     2. **Papers (文献列表)**: 列出具体的文献。
-                    
+
                     **严厉禁止 (Anti-Hallucination)：**
                     1. **严禁编造**论文标题、作者、期刊或链接。
                     2. 如果没有PDF链接或DOI，请留空。
-                    
+
                     **执行步骤：**
                     1. 搜索 Nature, Science, IAEA, ITER, PRL 等来源。
                     2. 提取信息，确保链接真实。
                     3. 编写综述。
-                    
+
                     **输出格式要求（非常重要）：**
                     **严禁输出任何开场白（如"好的"、"我找到了"等）。**
                     **仅输出**纯 JSON 对象，格式如下：
@@ -563,90 +581,51 @@ with tab2:
                     }}
                     """
                     
-                    payload = {
-                        "contents": [{"parts": [{ "text": prompt_search }]}],
-                        "tools": [{"google_search": {}}]
-                    }
-                    
-                    # 智能轮叫
+                    payload = {"contents": [{"parts": [{ "text": prompt_search }]}], "tools": [{"google_search": {}}]}
                     response = smart_api_call(model_list, payload, API_KEY, status_box_search)
                     
                     if response and response.status_code == 200:
-                        result = response.json()
-                        try:
-                            candidates = result.get('candidates', [])
-                            content_parts = candidates[0].get('content', {}).get('parts', [])
-                            raw_content = content_parts[0].get('text', "") if content_parts else ""
-                            
-                            search_results = parse_json_response(raw_content)
-                            
-                            status_box_search.update(label="检索完成", state="complete", expanded=False)
-                            
-                            if search_results:
-                                papers = []
-                                overview = ""
-                                if isinstance(search_results, dict):
-                                    papers = search_results.get('papers', [])
-                                    overview = search_results.get('overview', "")
-                                elif isinstance(search_results, list):
-                                    papers = search_results
-                                
-                                if overview:
-                                    with st.container():
-                                        st.markdown(f"""
-                                        <div class="overview-card">
-                                            <div style="font-size: 1.2em; font-weight: bold; margin-bottom: 10px;">
-                                                🧪 学术综述 (Overview)
-                                            </div>
-                                            <div style="line-height: 1.6; font-size: 1.0em;">
-                                                {overview}
-                                            </div>
-                                        </div>
-                                        """, unsafe_allow_html=True)
-
-                                if papers:
-                                    st.success(f"检索到 {len(papers)} 篇相关高价值文献")
-                                    for item in papers:
-                                        title = item.get('title', '未知标题')
-                                        doi = item.get('doi', '')
-                                        url = item.get('url', '#')
-                                        with st.container():
-                                            st.markdown(f"""
-                                            <div class="research-card">
-                                                <div style="font-size: 1.2em; font-weight: bold; color: #63b3ed; margin-bottom: 5px;">
-                                                    📄 {title}
-                                                </div>
-                                                <div style="font-size: 0.9em; color: #a0aec0; margin-bottom: 15px;">
-                                                    <span style="color: #e2e8f0;">{item.get('authors', '未知作者')}</span> | 
-                                                    <span style="font-style: italic;">{item.get('publication', '未知来源')}</span>, {item.get('year', 'N/A')}
-                                                </div>
-                                                <div style="border-top: 1px solid #4a5568; margin-bottom: 10px;"></div>
-                                                <div style="line-height: 1.6; color: #cbd5e0; font-family: 'Noto Serif SC', serif;">
-                                                    {item.get('summary', '暂无摘要')}
-                                                </div>
-                                            """, unsafe_allow_html=True)
-                                            col_links = st.columns([1, 1, 4])
-                                            st.markdown(f'<a href="{url}" target="_blank" class="source-link">🔗 原文/Abstract</a>', unsafe_allow_html=True)
-                                            if doi and len(doi) > 5:
-                                                scihub_url = f"https://x.sci-hub.org.cn/{doi}"
-                                                st.markdown(f'<a href="{scihub_url}" target="_blank" class="source-link scihub-btn">🔓 Sci-Hub 下载</a>', unsafe_allow_html=True)
-                                            st.markdown("</div>", unsafe_allow_html=True)
-                                else:
-                                    st.warning("未找到具体的文献列表，但已生成综述。")
-                            else:
-                                # 兜底显示
-                                st.warning("内容包含复杂格式，已为您展示原始搜索结果：")
-                                st.markdown(f"""
-                                <div class="overview-card" style="white-space: pre-wrap;">
-                                {raw_content}
-                                </div>
-                                """, unsafe_allow_html=True)
-                        except Exception as e:
-                            st.error(f"解析错误: {e}")
+                        raw_content = response.json().get('candidates', [])[0].get('content', {}).get('parts', [])[0].get('text', "")
+                        search_results = parse_json_response(raw_content)
+                        status_box_search.update(label="检索完成", state="complete", expanded=False)
+                        st.session_state["search_result"] = {"data": search_results, "raw": raw_content, "query": search_query}
                     else:
-                        st.error("所有模型请求均失败，请检查配额或稍后再试。")
-                else:
-                    st.error(f"无可用模型: {msg}")
+                        st.error("请求失败")
+        
+        if st.session_state.get("search_result"):
+            s_res = st.session_state["search_result"].get("data")
+            s_raw = st.session_state["search_result"].get("raw")
+            
+            col_act_s1, col_act_s2 = st.columns([1, 4])
+            with col_act_s1:
+                if st.button("❤️ 收藏结果", key="fav_btn_search"):
+                    add_to_favorites("Search", st.session_state["search_result"]["query"], st.session_state["search_result"])
+            st.divider()
+
+            if s_res:
+                papers = s_res.get('papers', []) if isinstance(s_res, dict) else s_res
+                overview = s_res.get('overview', "") if isinstance(s_res, dict) else ""
+                
+                if overview:
+                    st.markdown(f"""<div class="overview-card"><div style="font-size: 1.2em; font-weight: bold; margin-bottom: 10px;">🧪 学术综述 (Overview)</div><div style="line-height: 1.6;">{overview}</div></div>""", unsafe_allow_html=True)
+
+                if papers:
+                    st.success(f"检索到 {len(papers)} 篇相关文献")
+                    for item in papers:
+                        with st.container():
+                            st.markdown(f"""
+                            <div class="research-card">
+                                <div style="font-size: 1.2em; font-weight: bold; color: #63b3ed; margin-bottom: 5px;">📄 {item.get('title', '无标题')}</div>
+                                <div style="font-size: 0.9em; color: #a0aec0; margin-bottom: 15px;">{item.get('authors', 'N/A')} | {item.get('publication', 'N/A')}, {item.get('year', 'N/A')}</div>
+                                <div style="border-top: 1px solid #4a5568; margin-bottom: 10px;"></div>
+                                <div style="line-height: 1.6; color: #cbd5e0; font-family: 'Noto Serif SC', serif;">{item.get('summary', '暂无摘要')}</div>
+                            """, unsafe_allow_html=True)
+                            col_l1, col_l2, col_l3 = st.columns([1, 1, 4])
+                            st.markdown(f'<a href="{item.get("url", "#")}" target="_blank" class="source-link">🔗 原文</a>', unsafe_allow_html=True)
+                            if item.get('doi'): st.markdown(f'<a href="https://x.sci-hub.org.cn/{item.get("doi")}" target="_blank" class="source-link scihub-btn">🔓 Sci-Hub</a>', unsafe_allow_html=True)
+                            st.markdown("</div>", unsafe_allow_html=True)
+            else:
+                st.markdown(s_raw)
 
 # ==========================================
 # 模块三：学术改写 (Academic Rewrite)
@@ -656,26 +635,21 @@ with tab3:
 
     with col1_rewrite:
         st.markdown("#### ✍️ 原始草稿")
-        user_text_rewrite = st.text_area(
-            "待改写文本", 
-            height=500, 
-            label_visibility="collapsed", 
-            placeholder="请在此粘贴您的论文草稿、段落或句子...\n系统将优化逻辑、词汇与句式，使其符合高水平发表标准。", 
-            key="input_rewrite"
-        )
+        user_text_rewrite = st.text_area("待改写文本", height=500, label_visibility="collapsed", placeholder="请在此粘贴...", key="input_rewrite")
         rewrite_btn = st.button("✨ 开始学术改写", type="primary", use_container_width=True, key="btn_rewrite")
 
     with col2_rewrite:
         st.markdown("#### 🖋️ 改写结果")
+        
         if rewrite_btn and user_text_rewrite:
             if not API_KEY:
                 st.error("🔒 请在侧边栏输入 API Key")
             else:
-                status_box_rewrite = st.status("正在进行语言润色与逻辑重构...", expanded=True)
-                model_list, msg = get_prioritized_models(API_KEY)
+                status_box_rewrite = st.status("正在进行语言润色...", expanded=True)
+                model_list, _ = get_prioritized_models(API_KEY)
                 
                 if model_list:
-                    # --- 升级版学术改写 Prompt ---
+                    # --- 恢复完整的 Prompt ---
                     prompt_rewrite = f"""
                     你是一位在高级核杂质期刊有丰富经验的**人类学术编辑**。
                     请对以下文本进行**彻底的去AI化（De-AI）改写**，并提供双语对照。
@@ -695,7 +669,7 @@ with tab3:
                         -   如果改写后的正文是**英文**，必须在下方附上高水平的**中文翻译**。
                         -   如果改写后的正文是**中文**，必须在下方附上地道的**英文翻译**。
                         -   翻译也要符合上述的学术标准，不要直译。
-                    
+
                     **✅可以参考学习模仿以下写作风格：**
                      1.  "Direct drive means conducting electrons as the energy to create a reaction, usually in the form of laser beams..." (简洁直接的定义)
                      2.  "In this work, we present the results of an experiment aiming at proton acceleration using a focus with a homogeneous intensity distribution..." (清晰的实验叙述)
@@ -710,52 +684,96 @@ with tab3:
                     [TRANSLATION]
                     (这里是对应的另一种语言的高水平翻译)
                     """
-
-                    payload = {
-                        "contents": [{"parts": [{ "text": prompt_rewrite }]}]
-                    }
-
-                    # 智能轮叫
+                    
+                    payload = {"contents": [{"parts": [{ "text": prompt_rewrite }]}]}
                     response = smart_api_call(model_list, payload, API_KEY, status_box_rewrite)
                     
                     if response and response.status_code == 200:
-                        result = response.json()
-                        candidates = result.get('candidates', [])
-                        content_parts = candidates[0].get('content', {}).get('parts', [])
-                        full_text = content_parts[0].get('text', "") if content_parts else ""
-                        
+                        full_text = response.json().get('candidates', [])[0].get('content', {}).get('parts', [])[0].get('text', "")
                         status_box_rewrite.update(label="润色完成", state="complete", expanded=False)
                         
-                        if full_text:
-                            rewrite_content = full_text
-                            translation_content = ""
-                            
-                            if "[REWRITE]" in full_text and "[TRANSLATION]" in full_text:
-                                parts = full_text.split("[TRANSLATION]")
-                                rewrite_part = parts[0].replace("[REWRITE]", "").strip()
-                                translation_part = parts[1].strip()
-                                
-                                rewrite_content = rewrite_part
-                                translation_content = translation_part
-                            else:
-                                rewrite_content = full_text.replace("[REWRITE]", "").replace("[TRANSLATION]", "")
-
-                            translation_html = ""
-                            if translation_content:
-                                translation_html = f"""<div class="translation-section"><div style="margin-bottom: 8px; font-weight: bold;">🌐 Translation:</div>{translation_content.replace(chr(10), '<br>')}</div>"""
-
-                            st.markdown(f"""
-                            <div class="rewrite-card">
-                                <div style="margin-bottom: 10px; font-weight: bold; color: #81e6d9;">🖋️ Revised Text:</div>
-                                {rewrite_content.replace(chr(10), '<br>')}
-                                {translation_html}
-                            </div>
-                            """, unsafe_allow_html=True)
-                            
-                        else:
-                            st.error("生成内容为空，请重试。")
+                        rewrite_c = full_text
+                        trans_c = ""
+                        if "[REWRITE]" in full_text and "[TRANSLATION]" in full_text:
+                            parts = full_text.split("[TRANSLATION]")
+                            rewrite_c = parts[0].replace("[REWRITE]", "").strip()
+                            trans_c = parts[1].strip()
+                        
+                        st.session_state["rewrite_result"] = {
+                            "rewrite": rewrite_c, 
+                            "translation": trans_c, 
+                            "draft": user_text_rewrite
+                        }
                     else:
-                        st.error(f"API 请求失败: {response.status_code if response else 'TimeOut'}")
-                        if response: st.code(response.text)
-                else:
-                    st.error(f"无可用模型: {msg}")
+                        st.error("请求失败")
+
+        if st.session_state.get("rewrite_result"):
+            res = st.session_state["rewrite_result"]
+            
+            col_act_r1, col_act_r2 = st.columns([1, 4])
+            with col_act_r1:
+                if st.button("❤️ 收藏改写", key="fav_btn_rewrite"):
+                    title_preview = res["rewrite"][:20].replace("\n", " ") + "..."
+                    add_to_favorites("Rewrite", title_preview, res)
+            st.divider()
+
+            trans_html = f"""<div class="translation-section"><div style="margin-bottom: 8px; font-weight: bold;">🌐 Translation:</div>{res['translation'].replace(chr(10), '<br>')}</div>""" if res['translation'] else ""
+            st.markdown(f"""
+            <div class="rewrite-card">
+                <div style="margin-bottom: 10px; font-weight: bold; color: #81e6d9;">🖋️ Revised Text:</div>
+                {res['rewrite'].replace(chr(10), '<br>')}
+                {trans_html}
+            </div>
+            """, unsafe_allow_html=True)
+
+# ==========================================
+# 模块四：我的收藏 (Favorites)
+# ==========================================
+with tab4:
+    st.markdown("### ⭐ 我的收藏夹")
+    
+    if not st.session_state["favorites"]:
+        st.info("暂无收藏内容。请在其他板块点击 ❤️ 收藏按钮。")
+    else:
+        for index, item in enumerate(reversed(st.session_state["favorites"])):
+            original_index = len(st.session_state["favorites"]) - 1 - index
+            
+            with st.expander(f"[{item['category']}] {item['title']} - {item['time']}", expanded=False):
+                col_del, col_content = st.columns([1, 6])
+                with col_del:
+                    if st.button("🗑️ 删除", key=f"del_{item['id']}"):
+                        delete_favorite(original_index)
+                
+                with col_content:
+                    content = item['content']
+                    if item['category'] == 'Rewrite':
+                        st.caption("**原始草稿:**")
+                        st.text(content.get('draft', ''))
+                        st.caption("**改写结果:**")
+                        st.markdown(content.get('rewrite', ''))
+                        if content.get('translation'):
+                            st.divider()
+                            st.caption("**翻译:**")
+                            st.markdown(content.get('translation', ''))
+                            
+                    elif item['category'] == 'Check':
+                        st.caption("**核查详情:**")
+                        data = content.get('data')
+                        if data and isinstance(data, list):
+                            for claim_item in data:
+                                st.markdown(f"> **陈述**: {claim_item.get('claim')}")
+                                st.markdown(f"> **分析**: {claim_item.get('correction')}")
+                                st.divider()
+                        else:
+                            st.markdown(content.get('raw', '无法解析的内容'))
+                            
+                    elif item['category'] == 'Search':
+                        st.caption("**检索结果:**")
+                        data = content.get('data')
+                        if data and isinstance(data, dict):
+                            st.markdown(f"**综述**: {data.get('overview', '')}")
+                            st.markdown("**文献列表**:")
+                            for p in data.get('papers', []):
+                                st.markdown(f"- [{p.get('title')}]({p.get('url')})")
+                        else:
+                            st.markdown(content.get('raw', '无法解析的内容'))
