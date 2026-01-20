@@ -836,7 +836,7 @@ several 10s ofMeV energies.”
 # 模块四：我的收藏 (Favorites)
 # ==========================================
 with tab4:
-    st.markdown("### ⭐ 个人知识库 (本地保存)")
+    st.markdown("### ⭐ 个人知识库")
     
     favs = st.session_state["favorites"]
     if not favs:
