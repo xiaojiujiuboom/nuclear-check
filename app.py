@@ -3,8 +3,9 @@ import requests
 import json
 import re
 import time
-import ast # 新增：用于处理类 Python 字典格式
-import datetime # 新增：用于记录收藏时间
+import ast
+import datetime
+import os  # 新增：用于文件持久化操作
 
 # --- 1. 页面配置 (必须在最前面) ---
 st.set_page_config(
@@ -14,11 +15,32 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 初始化 Session State (用于状态保持和收藏夹) ---
-if "favorites" not in st.session_state:
-    st.session_state["favorites"] = []
+# --- 0. 持久化存储模块 (新增) ---
+FAV_FILE = "favorites.json"
 
-# 用于保持各板块的结果，防止点击按钮后结果消失
+def load_favorites():
+    """从本地文件加载收藏"""
+    if os.path.exists(FAV_FILE):
+        try:
+            with open(FAV_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+def save_favorites():
+    """保存收藏到本地文件"""
+    try:
+        with open(FAV_FILE, "w", encoding="utf-8") as f:
+            json.dump(st.session_state["favorites"], f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        st.error(f"保存失败: {e}")
+
+# --- 初始化 Session State ---
+if "favorites" not in st.session_state:
+    st.session_state["favorites"] = load_favorites()
+
+# 结果缓存 (防止刷新丢失当前页面内容)
 if "check_result" not in st.session_state:
     st.session_state["check_result"] = None
 if "search_result" not in st.session_state:
@@ -41,70 +63,58 @@ if not API_KEY:
         st.warning("🔒 未检测到配置文件的 API Key")
         API_KEY = st.text_input("请在此临时粘贴 API Key:", type="password", help="建议在 Streamlit Secrets 中配置 GEMINI_API_KEY 以免去每次输入的麻烦。")
 
-# --- 3. CSS 样式优化 ---
+# --- 3. CSS 样式优化 (针对用户反馈的UI问题进行修复) ---
 st.markdown("""
     <style>
         .block-container {padding-top: 1.5rem;}
         #MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
         
-        /* 通用深色模式适配 */
+        /* 核心卡片容器 */
+        .card-container {
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.2rem;
+            transition: transform 0.2s;
+            position: relative;
+        }
+        
+        /* 智能核查卡片 */
         .check-card {
+            background-color: #262730;
             border: 1px solid #464b59;
-            border-radius: 8px;
-            padding: 1.5rem;
-            margin-bottom: 1rem;
-            background-color: #262730; 
             color: #FAFAFA;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
         }
         
+        /* 学术检索卡片 */
         .research-card {
-            border: 1px solid #4a5568; 
+            background-color: #2d3748;
+            border: 1px solid #4a5568;
             border-left: 5px solid #63b3ed;
-            border-radius: 8px;
-            padding: 1.5rem;
-            margin-bottom: 1rem;
-            background-color: #2d3748; 
             color: #e2e8f0;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
         }
         
-        /* 学术综述卡片样式 */
+        /* 学术综述卡片 */
         .overview-card {
-            border: 1px solid #5a4b81; 
-            border-left: 5px solid #9f7aea; /* 紫色系 */
-            border-radius: 8px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-            background-color: #322659; /* 深紫色背景 */
+            background-color: #322659;
+            border: 1px solid #5a4b81;
+            border-left: 5px solid #9f7aea;
             color: #e9d8fd;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
         }
 
-        /* 学术改写卡片样式 */
+        /* 学术改写卡片 */
         .rewrite-card {
+            background-color: #234e52;
             border: 1px solid #285e61;
-            border-left: 5px solid #38b2ac; /* 青色系 */
-            border-radius: 8px;
-            padding: 2rem;
-            margin-bottom: 1.0rem;
-            background-color: #234e52; /* 深青色背景 */
+            border-left: 5px solid #38b2ac;
             color: #e6fffa;
-            font-family: "Noto Serif SC", serif; /* 使用衬线字体增加学术感 */
+            font-family: "Noto Serif SC", serif;
             line-height: 1.8;
             font-size: 1.05rem;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-        }
-        
-        /* 收藏卡片样式 */
-        .fav-card {
-            border: 1px solid #d69e2e;
-            border-radius: 8px;
-            padding: 1rem;
-            margin-bottom: 1rem;
-            background-color: #2b2518;
-            color: #ecc94b;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
         }
         
         /* 翻译部分样式 */
@@ -117,6 +127,7 @@ st.markdown("""
             font-style: italic;
         }
 
+        /* 链接按钮样式 */
         .source-link {
             display: inline-block;
             background-color: #363945;
@@ -147,7 +158,7 @@ st.markdown("""
             border-color: #fc8181;
         }
 
-        /* 证据容器样式 (浅色背景 + 深色文字) */
+        /* 证据容器样式 */
         .evidence-container {
             background-color: #f8f9fa; 
             border-radius: 6px;
@@ -203,7 +214,6 @@ def get_prioritized_models(api_key):
         if not available_names: return [], "未找到任何可用模型"
 
         # 定义优先级：稳定版 > 预览版 > 实验版
-        # 1.5-flash 通常有最高的 RPM (每分钟请求数)，所以放在前面保底
         priority_keywords = [
             'gemini-1.5-flash',
             'gemini-1.5-flash-8b',
@@ -213,13 +223,11 @@ def get_prioritized_models(api_key):
         ]
 
         sorted_models = []
-        # 先按优先级列表找
         for kw in priority_keywords:
             for name in available_names:
                 if kw in name and name not in sorted_models:
                     sorted_models.append(name)
         
-        # 把剩下的加进去作为最后的备选
         for name in available_names:
             if name not in sorted_models:
                 sorted_models.append(name)
@@ -240,7 +248,6 @@ def smart_api_call(model_list, payload, api_key, status_box=None):
     last_error = None
     
     for i, model_name in enumerate(model_list):
-        # 确保模型名称格式正确
         if not model_name.startswith("models/"): 
             full_model_name = f"models/{model_name}"
         else:
@@ -252,16 +259,12 @@ def smart_api_call(model_list, payload, api_key, status_box=None):
             status_box.write(f"🔄 正在尝试模型节点 ({i+1}/{len(model_list)}): `{model_name.replace('models/', '')}` ...")
         
         try:
-            # 发起请求
             response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload)
             
-            # --- 场景 A: 成功 ---
             if response.status_code == 200:
                 return response
             
-            # --- 场景 B: 400 Bad Request (通常是 Search 工具不兼容) ---
             elif response.status_code == 400:
-                # 尝试移除 tools 再试一次当前模型
                 if "tools" in payload:
                     if status_box: status_box.write("⚠️ 检测到工具兼容性问题，正在切换至纯文本分析模式...")
                     payload_no_tools = payload.copy()
@@ -269,19 +272,15 @@ def smart_api_call(model_list, payload, api_key, status_box=None):
                     response_retry = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload_no_tools)
                     if response_retry.status_code == 200:
                         return response_retry
-                
-                # 如果还是不行，记录错误继续下一个模型
                 last_error = response
                 continue
 
-            # --- 场景 C: 429/503 (限流或服务不可用) ---
             elif response.status_code in [429, 503, 500]:
                 if status_box: status_box.write(f"⏳ 模型 `{model_name}` 繁忙或配额耗尽，自动切换下一节点...")
-                time.sleep(1) # 小睡一下给服务器喘息
+                time.sleep(1)
                 last_error = response
                 continue
             
-            # 其他错误
             else:
                 last_error = response
                 continue
@@ -290,27 +289,16 @@ def smart_api_call(model_list, payload, api_key, status_box=None):
             if status_box: status_box.write(f"❌ 网络异常: {e}")
             continue
 
-    # 如果所有模型都试过了还是失败
     return last_error
 
 # --- 6. 辅助函数：解析 AI 返回的 JSON ---
 def parse_json_response(text):
-    """
-    超级鲁棒的解析器 V3.5：
-    1. 尝试直接解析。
-    2. 尝试正则清理 Markdown。
-    3. 暴力搜索最外层的 {} 或 []。
-    4. 尝试修复单引号问题 (Python dict 格式)。
-    """
     if not text: return None
-
-    # 方法 1: 直接解析
     try:
         return json.loads(text)
     except:
         pass
     
-    # 方法 2: 清理 Markdown 代码块
     try:
         clean_text = re.sub(r'```json\s*', '', text)
         clean_text = re.sub(r'```\s*$', '', clean_text)
@@ -319,7 +307,6 @@ def parse_json_response(text):
     except:
         pass
 
-    # 方法 3: 暴力寻找 JSON 结构
     try:
         start_obj = text.find('{')
         start_list = text.find('[')
@@ -341,11 +328,8 @@ def parse_json_response(text):
     except:
         pass
 
-    # 方法 4: 终极尝试 - AST 解析 (处理 Python 风格的单引号字典)
     try:
         if start_obj != -1 and end != -1:
-             # 有时候模型返回 {'key': 'value'} 而不是 {"key": "value"}
-             # ast.literal_eval 可以安全地解析 Python 结构
              potential_dict = text[start : end+1]
              return ast.literal_eval(potential_dict)
     except:
@@ -353,28 +337,42 @@ def parse_json_response(text):
 
     return None
 
-# --- 新增：收藏功能函数 ---
+# --- 新增：收藏功能函数 (颗粒度+持久化) ---
 def add_to_favorites(category, title, content_data):
     """
-    category: 'Check' | 'Search' | 'Rewrite'
+    category: 'Check' (单条结论) | 'Search' (单篇文献/综述) | 'Rewrite' (改写结果)
     title: 简短标题
     content_data: 完整数据 (JSON或文本)
     """
+    # 1. 查重
+    for item in st.session_state["favorites"]:
+        # 简单比对内容是否一致
+        if item['category'] == category and item['content'] == content_data:
+            st.toast("⚠️ 该内容已在收藏夹中", icon="👀")
+            return
+
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     item = {
         "id": f"{category}_{int(time.time()*1000)}",
         "category": category,
-        "title": title,
+        "title": title[:50] + "..." if len(title) > 50 else title, # 限制标题长度
         "content": content_data,
         "time": timestamp
     }
+    
+    # 2. 添加到 Session
     st.session_state["favorites"].append(item)
-    st.toast(f"✅ 已收藏到【我的收藏】: {title}", icon="⭐")
+    
+    # 3. 保存到本地文件 (持久化)
+    save_favorites()
+    
+    st.toast(f"✅ 已收藏: {title[:15]}...", icon="⭐")
 
-def delete_favorite(index):
-    if 0 <= index < len(st.session_state["favorites"]):
-        del st.session_state["favorites"][index]
-        st.rerun()
+def delete_favorite(item_id):
+    # 根据 ID 删除
+    st.session_state["favorites"] = [item for item in st.session_state["favorites"] if item['id'] != item_id]
+    save_favorites()
+    st.rerun()
 
 # --- 7. 核心页面逻辑 ---
 # 侧边栏
@@ -382,12 +380,12 @@ with st.sidebar:
     st.title("⚛️ Nuclear Hub")
     st.info(
         """
-        **版本**: Pro Max v4.1 (Restore)
+        **版本**: Pro Max v5.0 (Persistence & UI)
         
-        **功能恢复与升级**：
-        1. 完整恢复了深度指令 Prompt (V3.x)。
-        2. 增加了收藏夹功能 (V4.0)。
-        3. 保留了智能轮询与容错解析。
+        **功能升级**：
+        1. 💾 **自动保存**：收藏内容保存到本地，刷新不丢失。
+        2. ⭐ **精准收藏**：支持对每一条核查结论、每一篇文献单独收藏。
+        3. 🎨 **UI重构**：告别代码风，采用现代卡片设计。
         """
     )
     st.caption("Powered by Google Gemini & Streamlit")
@@ -424,7 +422,7 @@ with tab1:
                     status_box.update(label="初始化失败", state="error")
                     st.error(f"无法获取模型列表: {msg}")
                 else:
-                    # --- 恢复完整的 Prompt ---
+                    # --- 完整 Prompt (未修改) ---
                     prompt_check = f"""
                     你是一个严谨的核聚变与等离子体物理专家，同时拥有实时联网核查的能力。
                     请利用 Google Search 工具，核查以下文本中的每一个事实陈述。
@@ -468,24 +466,19 @@ with tab1:
                         check_results = parse_json_response(raw_content)
                         status_box.update(label="分析完成", state="complete", expanded=False)
                         
-                        st.session_state["check_result"] = {"data": check_results, "raw": raw_content, "query": user_text_check[:20]+"..."}
+                        st.session_state["check_result"] = {"data": check_results, "raw": raw_content}
                     else:
                         st.error("请求失败，请重试")
 
-        # 2. 显示逻辑
+        # 2. 显示逻辑 (重构为卡片 + 独立收藏按钮)
         if st.session_state.get("check_result"):
             res_data = st.session_state["check_result"].get("data")
             raw_text = st.session_state["check_result"].get("raw")
             
-            col_act1, col_act2 = st.columns([1, 4])
-            with col_act1:
-                if st.button("❤️ 收藏报告", key="fav_btn_check"):
-                    add_to_favorites("Check", st.session_state["check_result"]["query"], st.session_state["check_result"])
-            st.divider()
-
-            if res_data:
-                for item in res_data:
+            if res_data and isinstance(res_data, list):
+                for idx, item in enumerate(res_data):
                     status = item.get('status', '存疑')
+                    # 颜色逻辑
                     if "错" in status:
                         border_color = "#ff4b4b"; icon = "❌"; title_color = "#ff8a80"
                     elif "疑" in status or "不一致" in status:
@@ -494,8 +487,9 @@ with tab1:
                         border_color = "#66bb6a"; icon = "✅"; title_color = "#a5d6a7"
                     
                     with st.container():
+                        # --- 卡片渲染 ---
                         st.markdown(f"""
-                        <div class="check-card" style="border-left: 5px solid {border_color};">
+                        <div class="card-container check-card" style="border-left: 5px solid {border_color};">
                             <div style="margin-bottom: 12px;">
                                 <span style="font-weight: bold; font-size: 1.3em; color: {title_color};">{icon} {status}</span>
                                 <div style="color: #b0bec5; font-size: 0.9em; margin-top: 4px;">陈述：{item.get('claim', '')}</div>
@@ -506,17 +500,31 @@ with tab1:
                         """, unsafe_allow_html=True)
                         
                         evidence_list = item.get('evidence_list', [])
-                        if not evidence_list and 'evidence_quote' in item: evidence_list = [{'source_name': '权威数据', 'content': item['evidence_quote'], 'url': '#'}]
+                        # 兼容旧格式
+                        if not evidence_list and 'evidence_quote' in item: 
+                            evidence_list = [{'source_name': '权威数据', 'content': item['evidence_quote'], 'url': '#'}]
+                        
                         if evidence_list:
                             st.markdown('<div class="evidence-container">', unsafe_allow_html=True)
                             st.markdown('<div style="color: #555; margin-bottom: 8px; font-weight:bold;">🔍 权威数据/原文证据：</div>', unsafe_allow_html=True)
                             for ev in evidence_list:
                                 st.markdown(f"""
-                                <div class="quote-item"><span class="tag-pill">[{ev.get('source_name', '来源')}]</span>"{ev.get('content', '')}"<br>
-                                <a href="{ev.get('url', '#')}" target="_blank" class="source-link" style="margin-top:4px; display:inline-block;">🔗 来源</a></div>
+                                <div class="quote-item">
+                                    <span class="tag-pill">[{ev.get('source_name', '来源')}]</span>
+                                    "{ev.get('content', '')}"<br>
+                                    <a href="{ev.get('url', '#')}" target="_blank" class="source-link" style="margin-top:4px; display:inline-block;">🔗 来源</a>
+                                </div>
                                 """, unsafe_allow_html=True)
                             st.markdown('</div>', unsafe_allow_html=True)
+                        
                         st.markdown("</div>", unsafe_allow_html=True)
+                        
+                        # --- 独立收藏按钮 (放在卡片下方) ---
+                        col_space, col_fav = st.columns([6, 1])
+                        with col_fav:
+                            # 唯一 key 保证不冲突
+                            if st.button("⭐ 收藏", key=f"fav_chk_{idx}", help="收藏这条核查结论"):
+                                add_to_favorites("核查结论", item.get('claim'), item)
             else:
                 st.warning("原始结果展示：")
                 st.markdown(raw_text)
@@ -543,7 +551,7 @@ with tab2:
                 model_list, _ = get_prioritized_models(API_KEY)
                 
                 if model_list:
-                    # --- 恢复完整的 Prompt ---
+                    # --- 恢复完整的 Prompt (未修改) ---
                     prompt_search = f"""
                     你是一位资深的核科学研究员。请利用 Google Search 为用户寻找**真实存在**的权威学术文献、官方技术报告、行业白皮书或权威数据库记录。
 
@@ -557,7 +565,6 @@ with tab2:
                     1. 严禁编造标题、作者、发布机构、报告编号、期刊或链接。
                     2. 严格区分“新闻报道”与“原始报告/论文”，优先引用原始出处
                     3. 如果没有 PDF 链接、DOI 或官方归档页面，请留空。
-                        
 
                     **执行步骤：**
                     1. 搜索 Nature, Science等期刊, IAEA (国际原子能机构), OECD-NEA (核能署), ITER, DOE (美国能源部), WNA (世界核协会) 等官方渠道等来源。
@@ -590,42 +597,66 @@ with tab2:
                         raw_content = response.json().get('candidates', [])[0].get('content', {}).get('parts', [])[0].get('text', "")
                         search_results = parse_json_response(raw_content)
                         status_box_search.update(label="检索完成", state="complete", expanded=False)
-                        st.session_state["search_result"] = {"data": search_results, "raw": raw_content, "query": search_query}
+                        st.session_state["search_result"] = {"data": search_results, "raw": raw_content}
                     else:
                         st.error("请求失败")
         
+        # 2. 显示逻辑 (重构为卡片 + 独立收藏)
         if st.session_state.get("search_result"):
             s_res = st.session_state["search_result"].get("data")
             s_raw = st.session_state["search_result"].get("raw")
             
-            col_act_s1, col_act_s2 = st.columns([1, 4])
-            with col_act_s1:
-                if st.button("❤️ 收藏结果", key="fav_btn_search"):
-                    add_to_favorites("Search", st.session_state["search_result"]["query"], st.session_state["search_result"])
-            st.divider()
-
-            if s_res:
-                papers = s_res.get('papers', []) if isinstance(s_res, dict) else s_res
-                overview = s_res.get('overview', "") if isinstance(s_res, dict) else ""
+            if s_res and isinstance(s_res, dict):
+                papers = s_res.get('papers', [])
+                overview = s_res.get('overview', "")
                 
+                # --- 综述部分 ---
                 if overview:
-                    st.markdown(f"""<div class="overview-card"><div style="font-size: 1.2em; font-weight: bold; margin-bottom: 10px;">🧪 学术综述 (Overview)</div><div style="line-height: 1.6;">{overview}</div></div>""", unsafe_allow_html=True)
+                    with st.container():
+                        st.markdown(f"""
+                        <div class="card-container overview-card">
+                            <div style="font-size: 1.2em; font-weight: bold; margin-bottom: 10px;">🧪 学术综述 (Overview)</div>
+                            <div style="line-height: 1.6; font-size: 1.0em;">{overview}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        # 综述的收藏按钮
+                        col_sp, col_fv = st.columns([6, 1])
+                        with col_fv:
+                            if st.button("⭐ 收藏综述", key="fav_overview"):
+                                add_to_favorites("学术综述", f"关于 {search_query} 的综述", overview)
+                    
+                    st.divider()
 
+                # --- 文献列表部分 ---
                 if papers:
-                    st.success(f"检索到 {len(papers)} 篇相关文献或报道")
-                    for item in papers:
+                    st.success(f"检索到 {len(papers)} 篇相关文献")
+                    for idx, item in enumerate(papers):
                         with st.container():
+                            # 卡片
                             st.markdown(f"""
-                            <div class="research-card">
+                            <div class="card-container research-card">
                                 <div style="font-size: 1.2em; font-weight: bold; color: #63b3ed; margin-bottom: 5px;">📄 {item.get('title', '无标题')}</div>
-                                <div style="font-size: 0.9em; color: #a0aec0; margin-bottom: 15px;">{item.get('authors', 'N/A')} | {item.get('publication', 'N/A')}, {item.get('year', 'N/A')}</div>
+                                <div style="font-size: 0.9em; color: #a0aec0; margin-bottom: 15px;">
+                                    {item.get('authors', 'N/A')} | {item.get('publication', 'N/A')}, {item.get('year', 'N/A')}
+                                </div>
                                 <div style="border-top: 1px solid #4a5568; margin-bottom: 10px;"></div>
-                                <div style="line-height: 1.6; color: #cbd5e0; font-family: 'Noto Serif SC', serif;">{item.get('summary', '暂无摘要')}</div>
+                                <div style="line-height: 1.6; color: #cbd5e0; font-family: 'Noto Serif SC', serif;">
+                                    {item.get('summary', '暂无摘要')}
+                                </div>
+                            </div>
                             """, unsafe_allow_html=True)
-                            col_l1, col_l2, col_l3 = st.columns([1, 1, 4])
-                            st.markdown(f'<a href="{item.get("url", "#")}" target="_blank" class="source-link">🔗 原文</a>', unsafe_allow_html=True)
-                            if item.get('doi'): st.markdown(f'<a href="https://x.sci-hub.org.cn/{item.get("doi")}" target="_blank" class="source-link scihub-btn">🔓 Sci-Hub</a>', unsafe_allow_html=True)
-                            st.markdown("</div>", unsafe_allow_html=True)
+                            
+                            # 操作栏：链接 + 收藏
+                            col_l, col_f = st.columns([5, 1])
+                            with col_l:
+                                links_html = f'<a href="{item.get("url", "#")}" target="_blank" class="source-link">🔗 原文</a>'
+                                if item.get('doi'):
+                                    links_html += f' <a href="https://x.sci-hub.org.cn/{item.get("doi")}" target="_blank" class="source-link scihub-btn">🔓 Sci-Hub</a>'
+                                st.markdown(links_html, unsafe_allow_html=True)
+                            
+                            with col_f:
+                                if st.button("⭐ 收藏", key=f"fav_paper_{idx}", help="收藏这篇文献"):
+                                    add_to_favorites("学术文献", item.get('title'), item)
             else:
                 st.markdown(s_raw)
 
@@ -651,7 +682,7 @@ with tab3:
                 model_list, _ = get_prioritized_models(API_KEY)
                 
                 if model_list:
-                    # --- 恢复完整的 Prompt ---
+                    # --- 恢复完整的 Prompt (未修改) ---
                     prompt_rewrite = f"""
                     你是一位在高级核杂质期刊有丰富经验的**人类学术编辑**。
                     请对以下文本进行**彻底的去AI化（De-AI）改写**，并提供双语对照。
@@ -712,70 +743,93 @@ with tab3:
         if st.session_state.get("rewrite_result"):
             res = st.session_state["rewrite_result"]
             
-            col_act_r1, col_act_r2 = st.columns([1, 4])
-            with col_act_r1:
-                if st.button("❤️ 收藏改写", key="fav_btn_rewrite"):
-                    title_preview = res["rewrite"][:20].replace("\n", " ") + "..."
-                    add_to_favorites("Rewrite", title_preview, res)
-            st.divider()
-
-            trans_html = f"""<div class="translation-section"><div style="margin-bottom: 8px; font-weight: bold;">🌐 Translation:</div>{res['translation'].replace(chr(10), '<br>')}</div>""" if res['translation'] else ""
+            # --- 改写结果展示 + 收藏 ---
             st.markdown(f"""
-            <div class="rewrite-card">
+            <div class="card-container rewrite-card">
                 <div style="margin-bottom: 10px; font-weight: bold; color: #81e6d9;">🖋️ Revised Text:</div>
                 {res['rewrite'].replace(chr(10), '<br>')}
-                {trans_html}
             </div>
             """, unsafe_allow_html=True)
+            
+            c1, c2 = st.columns([6, 1])
+            with c2:
+                if st.button("⭐ 收藏改写", key="fav_btn_rewrite"):
+                    title_preview = res["rewrite"][:30].replace("\n", " ") + "..."
+                    add_to_favorites("改写结果", title_preview, res)
+            
+            # --- 翻译展示 ---
+            if res.get('translation'):
+                st.markdown(f"""
+                <div class="translation-section">
+                    <div style="margin-bottom: 8px; font-weight: bold;">🌐 Translation:</div>
+                    {res['translation'].replace(chr(10), '<br>')}
+                </div>
+                """, unsafe_allow_html=True)
 
 # ==========================================
 # 模块四：我的收藏 (Favorites)
 # ==========================================
 with tab4:
-    st.markdown("### ⭐ 我的收藏夹")
+    st.markdown("### ⭐ 个人知识库 (本地保存)")
     
-    if not st.session_state["favorites"]:
-        st.info("暂无收藏内容。请在其他板块点击 ❤️ 收藏按钮。")
+    favs = st.session_state["favorites"]
+    if not favs:
+        st.info("👋 暂无收藏。请在其他板块点击 '⭐' 按钮添加内容。")
     else:
-        for index, item in enumerate(reversed(st.session_state["favorites"])):
-            original_index = len(st.session_state["favorites"]) - 1 - index
+        st.caption(f"共 {len(favs)} 条记录 | 数据保存在 `{FAV_FILE}`")
+        
+        # 遍历显示收藏项 (倒序：最新的在最上面)
+        for index, item in enumerate(reversed(favs)):
+            # 注意：删除时需要用原始索引或者唯一ID
             
-            with st.expander(f"[{item['category']}] {item['title']} - {item['time']}", expanded=False):
-                col_del, col_content = st.columns([1, 6])
-                with col_del:
-                    if st.button("🗑️ 删除", key=f"del_{item['id']}"):
-                        delete_favorite(original_index)
+            with st.container():
+                # 使用自定义 CSS 框来美化
+                col_mark, col_content = st.columns([0.05, 0.95])
+                with col_mark:
+                    # 左侧彩色条
+                    color = "#63b3ed" if item['category'] == "学术文献" else "#66bb6a" if item['category'] == "核查结论" else "#d69e2e"
+                    st.markdown(f"<div style='height:100%; min-height: 50px; border-left: 4px solid {color};'>&nbsp;</div>", unsafe_allow_html=True)
                 
                 with col_content:
-                    content = item['content']
-                    if item['category'] == 'Rewrite':
-                        st.caption("**原始草稿:**")
-                        st.text(content.get('draft', ''))
-                        st.caption("**改写结果:**")
-                        st.markdown(content.get('rewrite', ''))
-                        if content.get('translation'):
-                            st.divider()
-                            st.caption("**翻译:**")
-                            st.markdown(content.get('translation', ''))
-                            
-                    elif item['category'] == 'Check':
-                        st.caption("**核查详情:**")
-                        data = content.get('data')
-                        if data and isinstance(data, list):
-                            for claim_item in data:
-                                st.markdown(f"> **陈述**: {claim_item.get('claim')}")
-                                st.markdown(f"> **分析**: {claim_item.get('correction')}")
-                                st.divider()
+                    # 标题栏
+                    c_title, c_del = st.columns([9, 1])
+                    with c_title:
+                        st.markdown(f"**[{item['category']}]** {item['title']}")
+                        st.caption(f"🕒 {item['time']}")
+                    with c_del:
+                        if st.button("🗑️", key=f"del_{item['id']}", help="删除此条"):
+                            delete_favorite(item['id'])
+                    
+                    # 内容详情折叠区
+                    with st.expander("查看详情"):
+                        content = item['content']
+                        
+                        # 1. 学术文献 (字典格式)
+                        if item['category'] == "学术文献" and isinstance(content, dict):
+                            st.markdown(f"**Authors:** {content.get('authors')}")
+                            st.info(content.get('summary'))
+                            st.markdown(f"[🔗 原文链接]({content.get('url')})")
+                        
+                        # 2. 核查结论 (字典格式)
+                        elif item['category'] == "核查结论" and isinstance(content, dict):
+                            st.markdown(f"**状态:** {content.get('status')}")
+                            st.warning(f"**分析:** {content.get('correction')}")
+                            st.markdown("**证据来源:**")
+                            for e in content.get('evidence_list', []):
+                                st.markdown(f"- [{e.get('source_name')}]({e.get('url')}): {e.get('content')}")
+                        
+                        # 3. 改写结果 (字典格式)
+                        elif item['category'] == "改写结果" and isinstance(content, dict):
+                            st.caption("原始草稿:")
+                            st.text(content.get('draft'))
+                            st.markdown("---")
+                            st.markdown("**改写:**")
+                            st.markdown(content.get('rewrite'))
+                            if content.get('translation'):
+                                st.markdown("**翻译:**")
+                                st.markdown(content.get('translation'))
+                        
+                        # 4. 纯文本/其他
                         else:
-                            st.markdown(content.get('raw', '无法解析的内容'))
-                            
-                    elif item['category'] == 'Search':
-                        st.caption("**检索结果:**")
-                        data = content.get('data')
-                        if data and isinstance(data, dict):
-                            st.markdown(f"**综述**: {data.get('overview', '')}")
-                            st.markdown("**文献列表**:")
-                            for p in data.get('papers', []):
-                                st.markdown(f"- [{p.get('title')}]({p.get('url')})")
-                        else:
-                            st.markdown(content.get('raw', '无法解析的内容'))
+                            st.markdown(str(content))
+            st.markdown("---")
