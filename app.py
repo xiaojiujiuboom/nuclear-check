@@ -857,7 +857,7 @@ several 10s ofMeV energies.”
 # 模块四：我的收藏 (Favorites)
 # ==========================================
 with tab4:
-    st.markdown(“小99的知识库")
+    st.markdown(f“小99的知识库")
     
     # --- 新增：数据备份与恢复区域 ---
     with st.expander("☁️ 数据备份与迁移", expanded=False):
