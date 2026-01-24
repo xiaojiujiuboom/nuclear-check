@@ -3,8 +3,8 @@ import requests
 import json
 import re
 import time
-import ast
-import datetime
+import ast # 新增：用于处理类 Python 字典格式
+import datetime # 新增：用于记录收藏时间
 import os  # 新增：用于文件持久化操作
 
 # --- 1. 页面配置 (必须在最前面) ---
@@ -117,12 +117,12 @@ st.markdown("""
             box-shadow: 0 4px 6px rgba(0,0,0,0.2);
         }
         
-        /* 翻译部分样式 */
+        /* 翻译部分样式 - 已修改颜色为白色 */
         .translation-section {
             margin-top: 1.5rem;
             padding-top: 1.5rem;
             border-top: 1px dashed #4fd1c5;
-            color: #333333;
+            color: #333333; 
             font-size: 0.95rem;
             font-style: italic;
         }
@@ -214,6 +214,7 @@ def get_prioritized_models(api_key):
         if not available_names: return [], "未找到任何可用模型"
 
         # 定义优先级：稳定版 > 预览版 > 实验版
+        # 1.5-flash 通常有最高的 RPM (每分钟请求数)，所以放在前面保底
         priority_keywords = [
             'gemini-1.5-flash',
             'gemini-1.5-flash-8b',
@@ -223,11 +224,13 @@ def get_prioritized_models(api_key):
         ]
 
         sorted_models = []
+        # 先按优先级列表找
         for kw in priority_keywords:
             for name in available_names:
                 if kw in name and name not in sorted_models:
                     sorted_models.append(name)
         
+        # 把剩下的加进去作为最后的备选
         for name in available_names:
             if name not in sorted_models:
                 sorted_models.append(name)
@@ -248,6 +251,7 @@ def smart_api_call(model_list, payload, api_key, status_box=None):
     last_error = None
     
     for i, model_name in enumerate(model_list):
+        # 确保模型名称格式正确
         if not model_name.startswith("models/"): 
             full_model_name = f"models/{model_name}"
         else:
@@ -259,12 +263,16 @@ def smart_api_call(model_list, payload, api_key, status_box=None):
             status_box.write(f"🔄 正在尝试模型节点 ({i+1}/{len(model_list)}): `{model_name.replace('models/', '')}` ...")
         
         try:
+            # 发起请求
             response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload)
             
+            # --- 场景 A: 成功 ---
             if response.status_code == 200:
                 return response
             
+            # --- 场景 B: 400 Bad Request (通常是 Search 工具不兼容) ---
             elif response.status_code == 400:
+                # 尝试移除 tools 再试一次当前模型
                 if "tools" in payload:
                     if status_box: status_box.write("⚠️ 检测到工具兼容性问题，正在切换至纯文本分析模式...")
                     payload_no_tools = payload.copy()
@@ -272,15 +280,19 @@ def smart_api_call(model_list, payload, api_key, status_box=None):
                     response_retry = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload_no_tools)
                     if response_retry.status_code == 200:
                         return response_retry
+                
+                # 如果还是不行，记录错误继续下一个模型
                 last_error = response
                 continue
 
+            # --- 场景 C: 429/503 (限流或服务不可用) ---
             elif response.status_code in [429, 503, 500]:
                 if status_box: status_box.write(f"⏳ 模型 `{model_name}` 繁忙或配额耗尽，自动切换下一节点...")
-                time.sleep(1)
+                time.sleep(1) # 小睡一下给服务器喘息
                 last_error = response
                 continue
             
+            # 其他错误
             else:
                 last_error = response
                 continue
@@ -289,16 +301,27 @@ def smart_api_call(model_list, payload, api_key, status_box=None):
             if status_box: status_box.write(f"❌ 网络异常: {e}")
             continue
 
+    # 如果所有模型都试过了还是失败
     return last_error
 
 # --- 6. 辅助函数：解析 AI 返回的 JSON ---
 def parse_json_response(text):
+    """
+    超级鲁棒的解析器 V3.5：
+    1. 尝试直接解析。
+    2. 尝试正则清理 Markdown。
+    3. 暴力搜索最外层的 {} 或 []。
+    4. 尝试修复单引号问题 (Python dict 格式)。
+    """
     if not text: return None
+
+    # 方法 1: 直接解析
     try:
         return json.loads(text)
     except:
         pass
     
+    # 方法 2: 清理 Markdown 代码块
     try:
         clean_text = re.sub(r'```json\s*', '', text)
         clean_text = re.sub(r'```\s*$', '', clean_text)
@@ -307,6 +330,7 @@ def parse_json_response(text):
     except:
         pass
 
+    # 方法 3: 暴力寻找 JSON 结构
     try:
         start_obj = text.find('{')
         start_list = text.find('[')
@@ -328,8 +352,11 @@ def parse_json_response(text):
     except:
         pass
 
+    # 方法 4: 终极尝试 - AST 解析 (处理 Python 风格的单引号字典)
     try:
         if start_obj != -1 and end != -1:
+             # 有时候模型返回 {'key': 'value'} 而不是 {"key": "value"}
+             # ast.literal_eval 可以安全地解析 Python 结构
              potential_dict = text[start : end+1]
              return ast.literal_eval(potential_dict)
     except:
@@ -380,12 +407,12 @@ with st.sidebar:
     st.title("⚛️ Nuclear Hub")
     st.info(
         """
-        **版本**: Pro Max v5.0 (Persistence & UI)
+        **版本**: Pro Max v4.1 (Restore)
         
-        **功能升级**：
-        1. 💾 **自动保存**：收藏内容保存到本地，刷新不丢失。
-        2. ⭐ **精准收藏**：支持对每一条核查结论、每一篇文献单独收藏。
-        3. 🎨 **UI重构**：告别代码风，采用现代卡片设计。
+        **功能恢复与升级**：
+        1. 完整恢复了深度指令 Prompt (V3.x)。
+        2. 增加了收藏夹功能 (V4.0)。
+        3. 保留了智能轮询与容错解析。
         """
     )
     st.caption("Powered by Google Gemini & Streamlit")
@@ -704,7 +731,7 @@ with tab3:
                         -   翻译也要符合上述的学术标准，不要直译。
 
                     **✅可以参考学习模仿以下PPCF\PR系列的文章的写作风格：**
-                     1.  "The cutoff energy and the divergence of the protons generated by the target normal sheath
+                      1.  "The cutoff energy and the divergence of the protons generated by the target normal sheath
 acceleration mechanism are known to be significantly influenced by micrometer and
 nanometer-size structures on the target front and rear surfaces. Specifically, the cutoff energy is
 significantly enhanced by creating a central rectangular groove (RG) on the target front surface,
@@ -715,7 +742,7 @@ drastically as a result of relativistically induced transparency as the thicknes
 the groove is reduced from a few micrometers to a few tens of nanometers, however, it drops
 sharply as the thickness of the rear wall is further reduced towards creating a complete hole
 through the target." 
-                     2.  "The interaction of a high-intensity femtosecond laser pulse
+                      2.  "The interaction of a high-intensity femtosecond laser pulse
 with a solid target results in highly energetic ions with MeV
 energies. These ion sources are of much interest as they offer
 measurement of fast-evolving electric and magnetic fields
@@ -723,7 +750,7 @@ using proton radiography technique. Other potential
 cutting-edge applications, in the foresight, include hadron
 therapy, isochoric heating of matter, fast ignition of
 fusion targets, and many more."
-                     3.  "In the present work, we investigate the impact of the depth
+                      3.  "In the present work, we investigate the impact of the depth
 of a micrometer-size groove on the front side of the target, or
 in other words the role of the thickness of the rear wall of the
 grooved target, in improving proton cutoff energies and their
@@ -736,14 +763,14 @@ onset time of relativistically induced transparency of the target
 rear wall with respect to the peak of the laser pulse plays a key
 role in determining the optimum width/thickness of the target
 rear wall. This is in agreement with the previous studies" 
-                   4. “Proton generation, transport and interaction with hollow cone targets are investigated by means of two-dimensional PIC simulations. A
+                    4. “Proton generation, transport and interaction with hollow cone targets are investigated by means of two-dimensional PIC simulations. A
 scaled-down hollow cone with gold walls, a carbon tip and a curved hydrogen foil inside the cone has been considered. Proton acceleration is
 driven by a 1020 W$cm	2 and 1 ps laser pulse focused on the hydrogen foil. Simulations show an important surface current at the cone walls
 which generates a magnetic field. This magnetic field is dragged by the quasi-neutral plasma formed by fast protons and co-moving electrons
 when they propagate towards the cone tip. As a result, a tens of kT Bz field is set up at the cone tip, which is strong enough to deflect the protons
 and increase the beam divergence substantially. We propose using heavy materials at the cone tip and increasing the laser intensity in order to
 mitigate magnetic field generation and proton beam divergence.”
-                5.“The standard proton fast ignition scheme assumes that the
+                 5.“The standard proton fast ignition scheme assumes that the
 proton beam is generated inside a hollow cone attached to an
 inertial fusion capsule by means of the TNSA scheme.Most
 of the proton FI calculations carried out so far are based on the
@@ -755,7 +782,7 @@ tip and emerge with a given divergence angle. In addition, it is
 widely assumed that there are not any relevant interactions be-
 tween the proton beam and the cone tip. Only recently, collective
 stopping of ion beams in solid matter has been reported”
-                6.“This article is organised as follows. In Section 2, the data
+                 6.“This article is organised as follows. In Section 2, the data
 used in PIC simulations are described. Section 3 summarises
 the results obtained for the proton beam generation and
 transport within a standard cone design. Next, in Section 4,it
@@ -764,7 +791,7 @@ intensity laser pulses in order to mitigate the magnetic field
 growth and the subsequent beam deflection at the cone tip.
 Finally, conclusions and future work are summarized in Sec-
 tion 5.”
-               7.“Alarge number ofstudies have been performed to understand the mechanism involved in the laser-plasma
+                7.“Alarge number ofstudies have been performed to understand the mechanism involved in the laser-plasma
 interaction-driven proton/ion acceleration. Among all possible candidates the target normal sheath
 acceleration (TNSA) mechanism [9–11] has received wider attention than other (radiation pressure-based)
 mechanisms. The paramount factor has been the wide accessibility ofthe laser parameters required for the
