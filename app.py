@@ -134,12 +134,12 @@ st.markdown("""
             box-shadow: 0 4px 6px rgba(0,0,0,0.2);
         }
         
-        /* 翻译部分样式 - 已修改为白色 #ffffff */
+        /* 翻译部分样式 - 已修改为黑色 #ffffff */
         .translation-section {
             margin-top: 1.5rem;
             padding-top: 1.5rem;
             border-top: 1px dashed #4fd1c5;
-            color: #ffffff; 
+            color: #333333; 
             font-size: 0.95rem;
             font-style: italic;
         }
@@ -857,10 +857,10 @@ several 10s ofMeV energies.”
 # 模块四：我的收藏 (Favorites)
 # ==========================================
 with tab4:
-    st.markdown(f"### ⭐ {st.session_state['user_id']} 的知识库"))
+    st.markdown(f"### ⭐ {st.session_state['user_id']} 的知识库")
     
     # --- 新增：数据备份与恢复区域 ---
-    with st.expander("☁️ 数据备份与迁移", expanded=False):
+    with st.expander("☁️ 数据备份与迁移 (跨设备使用)", expanded=False):
         col_ex, col_im = st.columns(2)
         with col_ex:
             st.markdown("**1. 导出数据**")
