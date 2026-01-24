@@ -18,25 +18,38 @@ st.set_page_config(
 # --- 0. 持久化存储模块 (新增) ---
 FAV_FILE = "favorites.json"
 
+def get_fav_file_path():
+    """根据当前用户ID生成文件名，实现多用户隔离"""
+    user_id = st.session_state.get("user_id", "default").strip()
+    if not user_id: user_id = "default"
+    # 过滤非法字符，防止文件名错误
+    safe_id = re.sub(r'[^a-zA-Z0-9_\u4e00-\u9fa5]', '_', user_id)
+    return f"favorites_{safe_id}.json"
+
 def load_favorites():
-    """从本地文件加载收藏"""
-    if os.path.exists(FAV_FILE):
+    """从当前用户的本地文件加载收藏"""
+    file_path = get_fav_file_path()
+    if os.path.exists(file_path):
         try:
-            with open(FAV_FILE, "r", encoding="utf-8") as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except:
             return []
     return []
 
 def save_favorites():
-    """保存收藏到本地文件"""
+    """保存收藏到当前用户的本地文件"""
+    file_path = get_fav_file_path()
     try:
-        with open(FAV_FILE, "w", encoding="utf-8") as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             json.dump(st.session_state["favorites"], f, ensure_ascii=False, indent=4)
     except Exception as e:
         st.error(f"保存失败: {e}")
 
 # --- 初始化 Session State ---
+if "user_id" not in st.session_state:
+    st.session_state["user_id"] = "default"
+
 if "favorites" not in st.session_state:
     st.session_state["favorites"] = load_favorites()
 
@@ -63,7 +76,7 @@ if not API_KEY:
         st.warning("🔒 未检测到配置文件的 API Key")
         API_KEY = st.text_input("请在此临时粘贴 API Key:", type="password", help="建议在 Streamlit Secrets 中配置 GEMINI_API_KEY 以免去每次输入的麻烦。")
 
-# --- 3. CSS 样式优化 (针对用户反馈的UI问题进行修复) ---
+# --- 3. CSS 样式优化 ---
 st.markdown("""
     <style>
         .block-container {padding-top: 1.5rem;}
@@ -77,6 +90,10 @@ st.markdown("""
             margin-bottom: 1.2rem;
             transition: transform 0.2s;
             position: relative;
+        }
+        .card-container:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
         }
         
         /* 智能核查卡片 */
@@ -117,7 +134,7 @@ st.markdown("""
             box-shadow: 0 4px 6px rgba(0,0,0,0.2);
         }
         
-        /* 翻译部分样式 - 已修改颜色为白色 */
+        /* 翻译部分样式 - 已修改为白色 #ffffff */
         .translation-section {
             margin-top: 1.5rem;
             padding-top: 1.5rem;
@@ -188,6 +205,11 @@ st.markdown("""
             color: #2d3748; 
             border: 1px solid #cbd5e0;
         }
+        
+        /* 用户ID输入框美化 */
+        .user-input {
+            border-bottom: 2px solid #4fd1c5;
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -195,10 +217,8 @@ st.markdown("""
 def get_prioritized_models(api_key):
     """
     返回一个按优先级排序的可用模型列表。
-    策略：优先使用稳定且配额高的 1.5-flash，其次是 2.0/2.5 等预览版。
     """
     if not api_key: return [], "API Key 未配置"
-    # 修复 URL 格式错误
     url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
     try:
         response = requests.get(url)
@@ -208,13 +228,10 @@ def get_prioritized_models(api_key):
         data = response.json()
         models = data.get('models', [])
         
-        # 筛选出支持生成的模型
         available_names = [m['name'] for m in models if 'generateContent' in m.get('supportedGenerationMethods', [])]
         
         if not available_names: return [], "未找到任何可用模型"
 
-        # 定义优先级：稳定版 > 预览版 > 实验版
-        # 1.5-flash 通常有最高的 RPM (每分钟请求数)，所以放在前面保底
         priority_keywords = [
             'gemini-1.5-flash',
             'gemini-1.5-flash-8b',
@@ -224,13 +241,11 @@ def get_prioritized_models(api_key):
         ]
 
         sorted_models = []
-        # 先按优先级列表找
         for kw in priority_keywords:
             for name in available_names:
                 if kw in name and name not in sorted_models:
                     sorted_models.append(name)
         
-        # 把剩下的加进去作为最后的备选
         for name in available_names:
             if name not in sorted_models:
                 sorted_models.append(name)
@@ -243,15 +258,11 @@ def get_prioritized_models(api_key):
 # --- 5. 增强版 API 调用：支持模型自动切换 ---
 def smart_api_call(model_list, payload, api_key, status_box=None):
     """
-    智能调用函数：
-    1. 遍历模型列表。
-    2. 如果遇到 429/500/503，自动切换下一个模型。
-    3. 如果遇到 400 (Bad Request)，尝试降级策略（移除 Search 工具）。
+    智能调用函数：自动轮询模型，处理 429/400 错误
     """
     last_error = None
     
     for i, model_name in enumerate(model_list):
-        # 确保模型名称格式正确
         if not model_name.startswith("models/"): 
             full_model_name = f"models/{model_name}"
         else:
@@ -263,16 +274,12 @@ def smart_api_call(model_list, payload, api_key, status_box=None):
             status_box.write(f"🔄 正在尝试模型节点 ({i+1}/{len(model_list)}): `{model_name.replace('models/', '')}` ...")
         
         try:
-            # 发起请求
             response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload)
             
-            # --- 场景 A: 成功 ---
             if response.status_code == 200:
                 return response
             
-            # --- 场景 B: 400 Bad Request (通常是 Search 工具不兼容) ---
             elif response.status_code == 400:
-                # 尝试移除 tools 再试一次当前模型
                 if "tools" in payload:
                     if status_box: status_box.write("⚠️ 检测到工具兼容性问题，正在切换至纯文本分析模式...")
                     payload_no_tools = payload.copy()
@@ -280,19 +287,15 @@ def smart_api_call(model_list, payload, api_key, status_box=None):
                     response_retry = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload_no_tools)
                     if response_retry.status_code == 200:
                         return response_retry
-                
-                # 如果还是不行，记录错误继续下一个模型
                 last_error = response
                 continue
 
-            # --- 场景 C: 429/503 (限流或服务不可用) ---
             elif response.status_code in [429, 503, 500]:
                 if status_box: status_box.write(f"⏳ 模型 `{model_name}` 繁忙或配额耗尽，自动切换下一节点...")
-                time.sleep(1) # 小睡一下给服务器喘息
+                time.sleep(1)
                 last_error = response
                 continue
             
-            # 其他错误
             else:
                 last_error = response
                 continue
@@ -301,27 +304,16 @@ def smart_api_call(model_list, payload, api_key, status_box=None):
             if status_box: status_box.write(f"❌ 网络异常: {e}")
             continue
 
-    # 如果所有模型都试过了还是失败
     return last_error
 
 # --- 6. 辅助函数：解析 AI 返回的 JSON ---
 def parse_json_response(text):
-    """
-    超级鲁棒的解析器 V3.5：
-    1. 尝试直接解析。
-    2. 尝试正则清理 Markdown。
-    3. 暴力搜索最外层的 {} 或 []。
-    4. 尝试修复单引号问题 (Python dict 格式)。
-    """
     if not text: return None
-
-    # 方法 1: 直接解析
     try:
         return json.loads(text)
     except:
         pass
     
-    # 方法 2: 清理 Markdown 代码块
     try:
         clean_text = re.sub(r'```json\s*', '', text)
         clean_text = re.sub(r'```\s*$', '', clean_text)
@@ -330,7 +322,6 @@ def parse_json_response(text):
     except:
         pass
 
-    # 方法 3: 暴力寻找 JSON 结构
     try:
         start_obj = text.find('{')
         start_list = text.find('[')
@@ -352,11 +343,8 @@ def parse_json_response(text):
     except:
         pass
 
-    # 方法 4: 终极尝试 - AST 解析 (处理 Python 风格的单引号字典)
     try:
         if start_obj != -1 and end != -1:
-             # 有时候模型返回 {'key': 'value'} 而不是 {"key": "value"}
-             # ast.literal_eval 可以安全地解析 Python 结构
              potential_dict = text[start : end+1]
              return ast.literal_eval(potential_dict)
     except:
@@ -373,7 +361,6 @@ def add_to_favorites(category, title, content_data):
     """
     # 1. 查重
     for item in st.session_state["favorites"]:
-        # 简单比对内容是否一致
         if item['category'] == category and item['content'] == content_data:
             st.toast("⚠️ 该内容已在收藏夹中", icon="👀")
             return
@@ -405,22 +392,31 @@ def delete_favorite(item_id):
 # 侧边栏
 with st.sidebar:
     st.title("⚛️ Nuclear Hub")
-    st.info(
-        """
-        **版本**: Pro Max v4.1 (Restore)
-        
-        **功能恢复与升级**：
-        1. 完整恢复了深度指令 Prompt (V3.x)。
-        2. 增加了收藏夹功能 (V4.0)。
-        3. 保留了智能轮询与容错解析。
-        """
-    )
+    st.info("**Pro Max v6.2 (Cloud-Backup)**\n\n支持数据导出与恢复，防止云端重启丢失数据。")
+    
+    # --- 用户 ID 管理 & 备份 ---
+    st.markdown("### 👤 档案管理")
+    
+    # 显示当前 ID
+    user_id_input = st.text_input("当前用户 ID (回车切换)", value=st.session_state["user_id"], help="不同的ID将保存不同的收藏记录")
+    
+    if user_id_input != st.session_state["user_id"]:
+        st.session_state["user_id"] = user_id_input
+        st.session_state["favorites"] = load_favorites() # 切换用户时重新加载数据
+        st.rerun()
+    
+    st.caption(f"当前数据文件: `{get_fav_file_path()}`")
+    st.divider()
+
+    if not API_KEY:
+        st.warning("🔒 未检测到 API Key")
+        API_KEY = st.text_input("请在此临时粘贴 API Key:", type="password", help="建议在 Streamlit Secrets 中配置")
+    
     st.caption("Powered by Google Gemini & Streamlit")
 
 st.title("Nuclear Knowledge Hub")
 st.caption("🚀 核科学事实核查、学术检索与专业改写平台")
 
-# 创建四个独立的 Tabs
 tab1, tab2, tab3, tab4 = st.tabs(["🔍 智能核查", "🔬 学术检索", "✍️ 学术改写", "⭐ 我的收藏"])
 
 # ==========================================
@@ -497,7 +493,7 @@ with tab1:
                     else:
                         st.error("请求失败，请重试")
 
-        # 2. 显示逻辑 (重构为卡片 + 独立收藏按钮)
+        # 2. 显示逻辑
         if st.session_state.get("check_result"):
             res_data = st.session_state["check_result"].get("data")
             raw_text = st.session_state["check_result"].get("raw")
@@ -527,7 +523,6 @@ with tab1:
                         """, unsafe_allow_html=True)
                         
                         evidence_list = item.get('evidence_list', [])
-                        # 兼容旧格式
                         if not evidence_list and 'evidence_quote' in item: 
                             evidence_list = [{'source_name': '权威数据', 'content': item['evidence_quote'], 'url': '#'}]
                         
@@ -546,10 +541,9 @@ with tab1:
                         
                         st.markdown("</div>", unsafe_allow_html=True)
                         
-                        # --- 独立收藏按钮 (放在卡片下方) ---
+                        # --- 独立收藏按钮 ---
                         col_space, col_fav = st.columns([6, 1])
                         with col_fav:
-                            # 唯一 key 保证不冲突
                             if st.button("⭐ 收藏", key=f"fav_chk_{idx}", help="收藏这条核查结论"):
                                 add_to_favorites("核查结论", item.get('claim'), item)
             else:
@@ -909,7 +903,7 @@ with tab4:
     if not favs:
         st.info("👋 暂无收藏。请在其他板块点击 '⭐' 按钮添加内容。")
     else:
-        st.caption(f"共 {len(favs)} 条记录 | 数据保存在 `{FAV_FILE}`")
+        st.caption(f"共 {len(favs)} 条记录")
         
         # 遍历显示收藏项 (倒序：最新的在最上面)
         for index, item in enumerate(reversed(favs)):
