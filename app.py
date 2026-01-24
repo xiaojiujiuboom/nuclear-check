@@ -134,12 +134,12 @@ st.markdown("""
             box-shadow: 0 4px 6px rgba(0,0,0,0.2);
         }
         
-        /* 翻译部分样式 - 已修改为黑色 #ffffff */
+        /* 翻译部分样式 - 已修改为白色 #ffffff */
         .translation-section {
             margin-top: 1.5rem;
             padding-top: 1.5rem;
             border-top: 1px dashed #4fd1c5;
-            color: #333333; 
+            color: #ffffff; 
             font-size: 0.95rem;
             font-style: italic;
         }
@@ -306,7 +306,20 @@ def smart_api_call(model_list, payload, api_key, status_box=None):
 
     return last_error
 
-# --- 6. 辅助函数：解析 AI 返回的 JSON ---
+# --- 6. 辅助函数：安全提取与解析 ---
+def get_response_text(response):
+    """安全提取响应文本，避免 IndexError"""
+    if not response: return None
+    try:
+        data = response.json()
+        if 'candidates' in data and data['candidates']:
+            parts = data['candidates'][0].get('content', {}).get('parts', [])
+            if parts:
+                return parts[0].get('text', '')
+        return None
+    except Exception as e:
+        return None
+
 def parse_json_response(text):
     if not text: return None
     try:
@@ -392,7 +405,7 @@ def delete_favorite(item_id):
 # 侧边栏
 with st.sidebar:
     st.title("⚛️ Nuclear Hub")
-    st.info("**Pro Max v6.2 (Cloud-Backup)**\n\n支持数据导出与恢复，防止云端重启丢失数据。")
+    st.info("**Pro Max v6.3 (Stable)**\n\n修复了结果解析可能导致的崩溃问题。")
     
     # --- 用户 ID 管理 & 备份 ---
     st.markdown("### 👤 档案管理")
@@ -484,14 +497,16 @@ with tab1:
                     payload = {"contents": [{"parts": [{ "text": prompt_check }]}], "tools": [{"google_search": {}}]}
                     response = smart_api_call(model_list, payload, API_KEY, status_box)
                     
-                    if response and response.status_code == 200:
-                        raw_content = response.json().get('candidates', [])[0].get('content', {}).get('parts', [])[0].get('text', "")
+                    # 使用新的安全提取函数
+                    raw_content = get_response_text(response)
+
+                    if raw_content:
                         check_results = parse_json_response(raw_content)
                         status_box.update(label="分析完成", state="complete", expanded=False)
-                        
                         st.session_state["check_result"] = {"data": check_results, "raw": raw_content}
                     else:
-                        st.error("请求失败，请重试")
+                        status_box.update(label="请求失败", state="error")
+                        st.error("请求失败或模型未返回内容，请重试")
 
         # 2. 显示逻辑
         if st.session_state.get("check_result"):
@@ -614,15 +629,18 @@ with tab2:
                     payload = {"contents": [{"parts": [{ "text": prompt_search }]}], "tools": [{"google_search": {}}]}
                     response = smart_api_call(model_list, payload, API_KEY, status_box_search)
                     
-                    if response and response.status_code == 200:
-                        raw_content = response.json().get('candidates', [])[0].get('content', {}).get('parts', [])[0].get('text', "")
+                    # 使用新的安全提取函数
+                    raw_content = get_response_text(response)
+
+                    if raw_content:
                         search_results = parse_json_response(raw_content)
                         status_box_search.update(label="检索完成", state="complete", expanded=False)
                         st.session_state["search_result"] = {"data": search_results, "raw": raw_content}
                     else:
-                        st.error("请求失败")
+                        status_box_search.update(label="请求失败", state="error")
+                        st.error("请求失败或模型未返回内容")
         
-        # 2. 显示逻辑 (重构为卡片 + 独立收藏)
+        # 2. 显示逻辑
         if st.session_state.get("search_result"):
             s_res = st.session_state["search_result"].get("data")
             s_raw = st.session_state["search_result"].get("raw")
@@ -808,14 +826,16 @@ several 10s ofMeV energies.”
                     payload = {"contents": [{"parts": [{ "text": prompt_rewrite }]}]}
                     response = smart_api_call(model_list, payload, API_KEY, status_box_rewrite)
                     
-                    if response and response.status_code == 200:
-                        full_text = response.json().get('candidates', [])[0].get('content', {}).get('parts', [])[0].get('text', "")
+                    # 使用新的安全提取函数
+                    raw_content = get_response_text(response)
+
+                    if raw_content:
                         status_box_rewrite.update(label="润色完成", state="complete", expanded=False)
                         
-                        rewrite_c = full_text
+                        rewrite_c = raw_content
                         trans_c = ""
-                        if "[REWRITE]" in full_text and "[TRANSLATION]" in full_text:
-                            parts = full_text.split("[TRANSLATION]")
+                        if "[REWRITE]" in raw_content and "[TRANSLATION]" in raw_content:
+                            parts = raw_content.split("[TRANSLATION]")
                             rewrite_c = parts[0].replace("[REWRITE]", "").strip()
                             trans_c = parts[1].strip()
                         
@@ -825,7 +845,8 @@ several 10s ofMeV energies.”
                             "draft": user_text_rewrite
                         }
                     else:
-                        st.error("请求失败")
+                        status_box_rewrite.update(label="请求失败", state="error")
+                        st.error("请求失败或模型未返回内容")
 
         if st.session_state.get("rewrite_result"):
             res = st.session_state["rewrite_result"]
@@ -860,7 +881,7 @@ with tab4:
     st.markdown(f"### ⭐ {st.session_state['user_id']} 的知识库")
     
     # --- 新增：数据备份与恢复区域 ---
-    with st.expander("☁️ 数据备份与迁移", expanded=False):
+    with st.expander("☁️ 数据备份与迁移 (跨设备使用)", expanded=False):
         col_ex, col_im = st.columns(2)
         with col_ex:
             st.markdown("**1. 导出数据**")
