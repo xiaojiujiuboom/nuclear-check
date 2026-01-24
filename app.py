@@ -122,7 +122,7 @@ st.markdown("""
             margin-top: 1.5rem;
             padding-top: 1.5rem;
             border-top: 1px dashed #4fd1c5;
-            color: #333333; 
+            color: #ffffff; 
             font-size: 0.95rem;
             font-style: italic;
         }
@@ -863,7 +863,47 @@ several 10s ofMeV energies.”
 # 模块四：我的收藏 (Favorites)
 # ==========================================
 with tab4:
-    st.markdown("### ⭐ 个人知识库")
+    st.markdown(f"### ⭐ {st.session_state['user_id']} 的知识库")
+    
+    # --- 新增：数据备份与恢复区域 ---
+    with st.expander("☁️ 数据备份与迁移 (跨设备使用)", expanded=False):
+        col_ex, col_im = st.columns(2)
+        with col_ex:
+            st.markdown("**1. 导出数据**")
+            # 准备数据
+            json_str = json.dumps(st.session_state["favorites"], ensure_ascii=False, indent=2)
+            
+            # 生成带时间戳的文件名
+            file_name = f"nuclear_backup_{st.session_state['user_id']}_{datetime.datetime.now().strftime('%Y%m%d')}.json"
+            
+            # 下载按钮
+            st.download_button(
+                label="📥 点击下载备份文件 (.json)",
+                data=json_str,
+                file_name=file_name,
+                mime="application/json",
+                use_container_width=True
+            )
+            
+            st.caption("或者手动复制下方代码：")
+            st.code(json_str, language="json")
+            
+        with col_im:
+            st.markdown("**2. 恢复数据** (粘贴 JSON 并按回车)")
+            restore_str = st.text_input("在此粘贴备份数据", key="restore_input")
+            if restore_str:
+                if st.button("确认恢复"):
+                    try:
+                        data = json.loads(restore_str)
+                        if isinstance(data, list):
+                            st.session_state["favorites"] = data
+                            save_favorites()
+                            st.success("恢复成功！刷新页面生效。")
+                            time.sleep(1)
+                            st.rerun()
+                    except: st.error("格式错误")
+
+    st.divider()
     
     favs = st.session_state["favorites"]
     if not favs:
