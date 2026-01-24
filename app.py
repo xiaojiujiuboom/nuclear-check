@@ -860,7 +860,7 @@ with tab4:
     st.markdown(f"### ⭐ {st.session_state['user_id']} 的知识库")
     
     # --- 新增：数据备份与恢复区域 ---
-    with st.expander("☁️ 数据备份与迁移 (跨设备使用)", expanded=False):
+    with st.expander("☁️ 数据备份与迁移", expanded=False):
         col_ex, col_im = st.columns(2)
         with col_ex:
             st.markdown("**1. 导出数据**")
