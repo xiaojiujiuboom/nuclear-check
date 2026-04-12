@@ -76,6 +76,17 @@ if not API_KEY:
         st.warning("🔒 未检测到配置文件的 API Key")
         API_KEY = st.text_input("请在此临时粘贴 API Key:", type="password", help="建议在 Streamlit Secrets 中配置 GEMINI_API_KEY 以免去每次输入的麻烦。")
 
+def get_secret_with_default(key, default):
+    """兼容本地/云端环境读取 secrets。"""
+    try:
+        return st.secrets.get(key, default)
+    except Exception:
+        return default
+
+GEMINI_BASE_URL = get_secret_with_default("GEMINI_BASE_URL", "https://api.xiaotiangong.com").rstrip("/")
+GEMINI_API_VERSION = get_secret_with_default("GEMINI_API_VERSION", "v1beta").strip("/")
+GEMINI_MODEL = get_secret_with_default("GEMINI_MODEL", "gemini-3-flash-preview")
+
 # --- 3. CSS 样式优化 ---
 st.markdown("""
     <style>
@@ -213,52 +224,19 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 4. 核心函数：获取模型轮换列表 (Model Rotation) ---
+# --- 4. 核心函数：固定模型配置 ---
 def get_prioritized_models(api_key):
     """
-    返回一个按优先级排序的可用模型列表。
+    新配置：固定使用 Gemini 3 Flash Preview。
     """
-    if not api_key: return [], "API Key 未配置"
-    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
-    try:
-        response = requests.get(url)
-        if response.status_code != 200:
-            return [], f"连接失败: {response.text}"
-        
-        data = response.json()
-        models = data.get('models', [])
-        
-        available_names = [m['name'] for m in models if 'generateContent' in m.get('supportedGenerationMethods', [])]
-        
-        if not available_names: return [], "未找到任何可用模型"
+    if not api_key:
+        return [], "API Key 未配置"
+    return [GEMINI_MODEL], "Success"
 
-        priority_keywords = [
-            'gemini-1.5-flash',
-            'gemini-1.5-flash-8b',
-            'gemini-2.0-flash',
-            'gemini-2.5-flash',
-            'gemini-1.5-pro'
-        ]
-
-        sorted_models = []
-        for kw in priority_keywords:
-            for name in available_names:
-                if kw in name and name not in sorted_models:
-                    sorted_models.append(name)
-        
-        for name in available_names:
-            if name not in sorted_models:
-                sorted_models.append(name)
-
-        return sorted_models, "Success"
-
-    except Exception as e:
-        return [], str(e)
-
-# --- 5. 增强版 API 调用：支持模型自动切换 ---
+# --- 5. 增强版 API 调用：兼容新网关地址 ---
 def smart_api_call(model_list, payload, api_key, status_box=None):
     """
-    智能调用函数：自动轮询模型，处理 429/400 错误
+    智能调用函数：自动重试模型节点，处理 429/400 错误
     """
     last_error = None
     
@@ -268,7 +246,7 @@ def smart_api_call(model_list, payload, api_key, status_box=None):
         else:
             full_model_name = model_name
             
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/{full_model_name}:generateContent?key={api_key}"
+        api_url = f"{GEMINI_BASE_URL}/{GEMINI_API_VERSION}/{full_model_name}:generateContent?key={api_key}"
         
         if status_box:
             status_box.write(f"🔄 正在尝试模型节点 ({i+1}/{len(model_list)}): `{model_name.replace('models/', '')}` ...")
