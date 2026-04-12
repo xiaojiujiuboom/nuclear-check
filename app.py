@@ -298,6 +298,26 @@ def get_response_text(response):
     except Exception as e:
         return None
 
+def get_response_error(response):
+    """提取接口错误详情，便于定位问题。"""
+    if not response:
+        return "无响应"
+    try:
+        data = response.json()
+        if isinstance(data, dict):
+            if isinstance(data.get("error"), dict):
+                err = data.get("error", {})
+                msg = err.get("message") or json.dumps(err, ensure_ascii=False)
+                return f"HTTP {response.status_code}: {msg}"
+            if data.get("msg"):
+                return f"HTTP {response.status_code}: {data.get('msg')}"
+            return f"HTTP {response.status_code}: {json.dumps(data, ensure_ascii=False)[:400]}"
+    except Exception:
+        pass
+    text = getattr(response, "text", "")
+    text = text[:400] if text else "未知错误"
+    return f"HTTP {getattr(response, 'status_code', 'N/A')}: {text}"
+
 def parse_json_response(text):
     if not text: return None
     try:
@@ -484,7 +504,7 @@ with tab1:
                         st.session_state["check_result"] = {"data": check_results, "raw": raw_content}
                     else:
                         status_box.update(label="请求失败", state="error")
-                        st.error("请求失败或模型未返回内容，请重试")
+                        st.error(f"请求失败或模型未返回内容：{get_response_error(response)}")
 
         # 2. 显示逻辑
         if st.session_state.get("check_result"):
@@ -616,7 +636,7 @@ with tab2:
                         st.session_state["search_result"] = {"data": search_results, "raw": raw_content}
                     else:
                         status_box_search.update(label="请求失败", state="error")
-                        st.error("请求失败或模型未返回内容")
+                        st.error(f"请求失败或模型未返回内容：{get_response_error(response)}")
         
         # 2. 显示逻辑
         if st.session_state.get("search_result"):
@@ -824,7 +844,7 @@ several 10s ofMeV energies.”
                         }
                     else:
                         status_box_rewrite.update(label="请求失败", state="error")
-                        st.error("请求失败或模型未返回内容")
+                        st.error(f"请求失败或模型未返回内容：{get_response_error(response)}")
 
         if st.session_state.get("rewrite_result"):
             res = st.session_state["rewrite_result"]
