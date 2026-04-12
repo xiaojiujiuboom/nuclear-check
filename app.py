@@ -86,6 +86,7 @@ def get_secret_with_default(key, default):
 GEMINI_BASE_URL = get_secret_with_default("GEMINI_BASE_URL", "https://api.xiaotiangong.com").rstrip("/")
 GEMINI_API_VERSION = get_secret_with_default("GEMINI_API_VERSION", "v1beta").strip("/")
 GEMINI_MODEL = get_secret_with_default("GEMINI_MODEL", "gemini-3-flash-preview")
+GEMINI_FALLBACK_MODEL = get_secret_with_default("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash")
 
 # --- 3. CSS 样式优化 ---
 st.markdown("""
@@ -227,11 +228,14 @@ st.markdown("""
 # --- 4. 核心函数：固定模型配置 ---
 def get_prioritized_models(api_key):
     """
-    新配置：固定使用 Gemini 3 Flash Preview。
+    新配置：优先 Gemini 3 Flash Preview，失败时自动切到 2.5 Flash。
     """
     if not api_key:
         return [], "API Key 未配置"
-    return [GEMINI_MODEL], "Success"
+    model_list = [GEMINI_MODEL, GEMINI_FALLBACK_MODEL]
+    # 去重并过滤空值
+    model_list = [m for i, m in enumerate(model_list) if m and m not in model_list[:i]]
+    return model_list, "Success"
 
 # --- 5. 增强版 API 调用：兼容新网关地址 ---
 def smart_api_call(model_list, payload, api_key, status_box=None):
@@ -317,6 +321,32 @@ def get_response_error(response):
     text = getattr(response, "text", "")
     text = text[:400] if text else "未知错误"
     return f"HTTP {getattr(response, 'status_code', 'N/A')}: {text}"
+
+def extract_grounding_sources(response):
+    """
+    从 Gemini grounded response 中提取可点击来源。
+    """
+    if not response:
+        return []
+    try:
+        data = response.json()
+    except Exception:
+        return []
+
+    sources = []
+    seen = set()
+    candidates = data.get("candidates", [])
+    for cand in candidates:
+        meta = cand.get("groundingMetadata", {})
+        chunks = meta.get("groundingChunks", [])
+        for ch in chunks:
+            web_info = ch.get("web", {})
+            uri = web_info.get("uri", "").strip()
+            title = web_info.get("title", "").strip() or "来源"
+            if uri and uri not in seen:
+                seen.add(uri)
+                sources.append({"title": title, "url": uri})
+    return sources
 
 def parse_json_response(text):
     if not text: return None
@@ -466,11 +496,12 @@ with tab1:
 
                     **重要指示：**
                     1. **多源数据对比**：如果不同权威机构的数据不一致（例如 IAEA 数据 vs 中国核能行业协会数据），**请不要只给出一个数字**，而必须将各方数据分别列出。
-                    2. **原文引用 (双语)**：
-                       - 对于每一个数据点，必须引用查找资料的原话。
-                       - **关键要求**：如果引用的原文是英文，**必须**在后面附带中文翻译。
-                       - 格式示例："The reactor has... (译文: 该反应堆拥有...)"。
+                    2. **原文引用 (双语 + 可定位)**：
+                       - 对于每一个数据点，必须给出可在来源页面中检索到的**原文短句**。
+                       - 如果引用原文是英文，后面必须附中文翻译。
+                       - 额外提供 `search_hint`：可直接用于页面内查找的一段英文关键词（建议 6-16 个词）。
                     3. **实时性**：以搜索到的最新官方报告为准。
+                    4. **来源准确性**：`url` 必须是直接包含该信息的页面链接，不要只给网站首页。
 
                     **输出格式要求（非常重要）：**
                     **严禁输出任何开场白或结束语（如"好的"、"以下是结果"）。**
@@ -485,6 +516,7 @@ with tab1:
                                 {{
                                     "source_name": "机构名称",
                                     "content": "具体描述/数据 (如果是英文请附带中文翻译)",
+                                    "search_hint": "可在页面内搜索定位的关键词短句",
                                     "url": "来源链接"
                                 }}
                             ]
@@ -500,8 +532,9 @@ with tab1:
 
                     if raw_content:
                         check_results = parse_json_response(raw_content)
+                        grounded_sources = extract_grounding_sources(response)
                         status_box.update(label="分析完成", state="complete", expanded=False)
-                        st.session_state["check_result"] = {"data": check_results, "raw": raw_content}
+                        st.session_state["check_result"] = {"data": check_results, "raw": raw_content, "grounded_sources": grounded_sources}
                     else:
                         status_box.update(label="请求失败", state="error")
                         st.error(f"请求失败或模型未返回内容：{get_response_error(response)}")
@@ -510,6 +543,13 @@ with tab1:
         if st.session_state.get("check_result"):
             res_data = st.session_state["check_result"].get("data")
             raw_text = st.session_state["check_result"].get("raw")
+            grounded_sources = st.session_state["check_result"].get("grounded_sources", [])
+
+            if grounded_sources:
+                st.markdown("##### 🔗 可追溯来源 (Grounding)")
+                st.caption("以下链接来自模型工具返回的原始可追溯来源，可优先用于核对。")
+                for src in grounded_sources[:8]:
+                    st.markdown(f"- [{src.get('title', '来源')}]({src.get('url', '#')})")
             
             if res_data and isinstance(res_data, list):
                 for idx, item in enumerate(res_data):
@@ -547,6 +587,7 @@ with tab1:
                                 <div class="quote-item">
                                     <span class="tag-pill">[{ev.get('source_name', '来源')}]</span>
                                     "{ev.get('content', '')}"<br>
+                                    {'<span style="color:#5f6368; font-size:0.88em;">🔎 页面检索建议: ' + ev.get('search_hint', '') + '</span><br>' if ev.get('search_hint') else ''}
                                     <a href="{ev.get('url', '#')}" target="_blank" class="source-link" style="margin-top:4px; display:inline-block;">🔗 来源</a>
                                 </div>
                                 """, unsafe_allow_html=True)
@@ -599,6 +640,7 @@ with tab2:
                     1. 严禁编造标题、作者、发布机构、报告编号、期刊或链接。
                     2. 严格区分“新闻报道”与“原始报告/论文”，优先引用原始出处
                     3. 如果没有 PDF 链接、DOI 或官方归档页面，请留空。
+                    4. 每条 papers 必须给出可在页面中检索的 `search_hint`（英文关键词短句，6-16词）。
 
                     **执行步骤：**
                     1. 搜索 Nature, Science等期刊, IAEA (国际原子能机构), OECD-NEA (核能署), ITER, DOE (美国能源部), WNA (世界核协会) 等官方渠道等来源。
@@ -617,6 +659,7 @@ with tab2:
                                 "publication": "来源 (如 Nature, IAEA)",
                                 "year": "年份",
                                 "summary": "详细摘要 (请保留英文原文，并在后面附带中文翻译)",
+                                "search_hint": "可在页面内检索定位的关键词短句",
                                 "doi": "DOI或空字符串",
                                 "url": "真实URL"
                             }}
@@ -632,8 +675,9 @@ with tab2:
 
                     if raw_content:
                         search_results = parse_json_response(raw_content)
+                        grounded_sources = extract_grounding_sources(response)
                         status_box_search.update(label="检索完成", state="complete", expanded=False)
-                        st.session_state["search_result"] = {"data": search_results, "raw": raw_content}
+                        st.session_state["search_result"] = {"data": search_results, "raw": raw_content, "grounded_sources": grounded_sources}
                     else:
                         status_box_search.update(label="请求失败", state="error")
                         st.error(f"请求失败或模型未返回内容：{get_response_error(response)}")
@@ -642,6 +686,7 @@ with tab2:
         if st.session_state.get("search_result"):
             s_res = st.session_state["search_result"].get("data")
             s_raw = st.session_state["search_result"].get("raw")
+            grounded_sources = st.session_state["search_result"].get("grounded_sources", [])
             
             if s_res and isinstance(s_res, dict):
                 papers = s_res.get('papers', [])
@@ -667,6 +712,10 @@ with tab2:
                 # --- 文献列表部分 ---
                 if papers:
                     st.success(f"检索到 {len(papers)} 篇相关文献")
+                    if grounded_sources:
+                        st.caption("以下为模型工具返回的可追溯来源链接，可优先核对：")
+                        for src in grounded_sources[:8]:
+                            st.markdown(f"- [{src.get('title', '来源')}]({src.get('url', '#')})")
                     for idx, item in enumerate(papers):
                         with st.container():
                             # 卡片
@@ -680,6 +729,7 @@ with tab2:
                                 <div style="line-height: 1.6; color: #cbd5e0; font-family: 'Noto Serif SC', serif;">
                                     {item.get('summary', '暂无摘要')}
                                 </div>
+                                {"<div style='margin-top:8px; font-size:0.88em; color:#9fb3c8;'>🔎 页面检索建议: " + item.get('search_hint', '') + "</div>" if item.get('search_hint') else ""}
                             </div>
                             """, unsafe_allow_html=True)
                             

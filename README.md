@@ -14,6 +14,7 @@ GEMINI_API_KEY = "your-api-key"
 GEMINI_BASE_URL = "https://api.xiaotiangong.com"
 GEMINI_API_VERSION = "v1beta"
 GEMINI_MODEL = "gemini-3-flash-preview"
+GEMINI_FALLBACK_MODEL = "gemini-2.5-flash"
 ```
 
 `GEMINI_BASE_URL / GEMINI_API_VERSION / GEMINI_MODEL` are optional now because the app already defaults to these values.
