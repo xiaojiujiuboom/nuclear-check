@@ -77,7 +77,7 @@ def get_secret_with_default(key, default):
 API_KEY = str(get_secret_with_default("XIAOTIANGONG_API_KEY", "") or get_secret_with_default("GEMINI_API_KEY", "")).strip()
 GEMINI_BASE_URL = str(get_secret_with_default("XIAOTIANGONG_BASE_URL", "https://api.xiaotiangong.com")).rstrip("/")
 GEMINI_API_VERSION = str(get_secret_with_default("XIAOTIANGONG_API_VERSION", "v1beta")).strip("/")
-GEMINI_MODEL = str(get_secret_with_default("XIAOTIANGONG_MODEL", "gemini-3-flash-preview")).strip()
+GEMINI_MODEL = str(get_secret_with_default("XIAOTIANGONG_MODEL", "gemini-3.5-flash")).strip()
 GEMINI_FALLBACK_MODEL = str(get_secret_with_default("XIAOTIANGONG_FALLBACK_MODEL", "gemini-2.5-flash")).strip()
 GEMINI_ENABLE_SEARCH = str(get_secret_with_default("XIAOTIANGONG_ENABLE_SEARCH", "false")).lower() in {"1", "true", "yes", "on"}
 
