@@ -104,7 +104,7 @@ def generate_text(
     http_options = types.HttpOptions(
         api_version=api_version.strip("/"),
         base_url=base_url.rstrip("/"),
-        timeout=20_000,
+        timeout=60_000,
         retry_options=types.HttpRetryOptions(
             attempts=1,
             initial_delay=1,
