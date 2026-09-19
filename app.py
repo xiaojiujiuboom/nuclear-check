@@ -79,6 +79,7 @@ GEMINI_BASE_URL = str(get_secret_with_default("XIAOTIANGONG_BASE_URL", "https://
 GEMINI_API_VERSION = str(get_secret_with_default("XIAOTIANGONG_API_VERSION", "v1beta")).strip("/")
 GEMINI_MODEL = str(get_secret_with_default("XIAOTIANGONG_MODEL", "gemini-3-flash-preview")).strip()
 GEMINI_FALLBACK_MODEL = str(get_secret_with_default("XIAOTIANGONG_FALLBACK_MODEL", "gemini-2.5-flash")).strip()
+GEMINI_ENABLE_SEARCH = str(get_secret_with_default("XIAOTIANGONG_ENABLE_SEARCH", "false")).lower() in {"1", "true", "yes", "on"}
 
 # --- 3. CSS 样式优化 ---
 st.markdown("""
@@ -417,7 +418,7 @@ with tab1:
                         api_version=GEMINI_API_VERSION,
                         models=model_list,
                         prompt=prompt_check,
-                        use_search=True,
+                        use_search=GEMINI_ENABLE_SEARCH,
                         on_status=status_box.write,
                     )
                     raw_content = result.text
@@ -565,7 +566,7 @@ with tab2:
                         api_version=GEMINI_API_VERSION,
                         models=model_list,
                         prompt=prompt_search,
-                        use_search=True,
+                        use_search=GEMINI_ENABLE_SEARCH,
                         on_status=status_box_search.write,
                     )
                     raw_content = result.text
