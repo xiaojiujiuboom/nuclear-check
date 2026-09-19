@@ -1,11 +1,12 @@
 import streamlit as st
-import requests
 import json
 import re
 import time
 import ast # 新增：用于处理类 Python 字典格式
 import datetime # 新增：用于记录收藏时间
 import os  # 新增：用于文件持久化操作
+
+from api_client import generate_text
 
 # --- 1. 页面配置 (必须在最前面) ---
 st.set_page_config(
@@ -61,32 +62,23 @@ if "search_result" not in st.session_state:
 if "rewrite_result" not in st.session_state:
     st.session_state["rewrite_result"] = None
 
-# --- 2. 获取 API Key (双重保险模式) ---
-try:
-    if "GEMINI_API_KEY" in st.secrets:
-        API_KEY = st.secrets["GEMINI_API_KEY"]
-    else:
-        API_KEY = ""
-except FileNotFoundError:
-    API_KEY = ""
-
-if not API_KEY:
-    with st.sidebar:
-        st.divider()
-        st.warning("🔒 未检测到配置文件的 API Key")
-        API_KEY = st.text_input("请在此临时粘贴 API Key:", type="password", help="建议在 Streamlit Secrets 中配置 GEMINI_API_KEY 以免去每次输入的麻烦。")
-
 def get_secret_with_default(key, default):
-    """兼容本地/云端环境读取 secrets。"""
+    """兼容 Streamlit Secrets 和环境变量。"""
     try:
-        return st.secrets.get(key, default)
+        value = st.secrets.get(key)
+        if value is not None:
+            return value
     except Exception:
-        return default
+        pass
+    return os.getenv(key, default)
 
-GEMINI_BASE_URL = get_secret_with_default("GEMINI_BASE_URL", "https://api.xiaotiangong.com").rstrip("/")
-GEMINI_API_VERSION = get_secret_with_default("GEMINI_API_VERSION", "v1beta").strip("/")
-GEMINI_MODEL = get_secret_with_default("GEMINI_MODEL", "gemini-3-flash-preview")
-GEMINI_FALLBACK_MODEL = get_secret_with_default("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash")
+# 优先使用新命名，同时兼容原有 Key。模型配置改名可避免旧的
+# GEMINI_MODEL=gemini-3.1-pro 继续覆盖新网关的默认模型。
+API_KEY = str(get_secret_with_default("XIAOTIANGONG_API_KEY", "") or get_secret_with_default("GEMINI_API_KEY", "")).strip()
+GEMINI_BASE_URL = str(get_secret_with_default("XIAOTIANGONG_BASE_URL", "https://api.xiaotiangong.com")).rstrip("/")
+GEMINI_API_VERSION = str(get_secret_with_default("XIAOTIANGONG_API_VERSION", "v1beta")).strip("/")
+GEMINI_MODEL = str(get_secret_with_default("XIAOTIANGONG_MODEL", "gemini-3-flash-preview")).strip()
+GEMINI_FALLBACK_MODEL = str(get_secret_with_default("XIAOTIANGONG_FALLBACK_MODEL", "gemini-2.5-flash")).strip()
 
 # --- 3. CSS 样式优化 ---
 st.markdown("""
@@ -237,116 +229,7 @@ def get_prioritized_models(api_key):
     model_list = [m for i, m in enumerate(model_list) if m and m not in model_list[:i]]
     return model_list, "Success"
 
-# --- 5. 增强版 API 调用：兼容新网关地址 ---
-def smart_api_call(model_list, payload, api_key, status_box=None):
-    """
-    智能调用函数：自动重试模型节点，处理 429/400 错误
-    """
-    last_error = None
-    
-    for i, model_name in enumerate(model_list):
-        if not model_name.startswith("models/"): 
-            full_model_name = f"models/{model_name}"
-        else:
-            full_model_name = model_name
-            
-        api_url = f"{GEMINI_BASE_URL}/{GEMINI_API_VERSION}/{full_model_name}:generateContent?key={api_key}"
-        
-        if status_box:
-            status_box.write(f"🔄 正在尝试模型节点 ({i+1}/{len(model_list)}): `{model_name.replace('models/', '')}` ...")
-        
-        try:
-            response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload)
-            
-            if response.status_code == 200:
-                return response
-            
-            elif response.status_code == 400:
-                if "tools" in payload:
-                    if status_box: status_box.write("⚠️ 检测到工具兼容性问题，正在切换至纯文本分析模式...")
-                    payload_no_tools = payload.copy()
-                    del payload_no_tools["tools"]
-                    response_retry = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload_no_tools)
-                    if response_retry.status_code == 200:
-                        return response_retry
-                last_error = response
-                continue
-
-            elif response.status_code in [429, 503, 500]:
-                if status_box: status_box.write(f"⏳ 模型 `{model_name}` 繁忙或配额耗尽，自动切换下一节点...")
-                time.sleep(1)
-                last_error = response
-                continue
-            
-            else:
-                last_error = response
-                continue
-
-        except Exception as e:
-            if status_box: status_box.write(f"❌ 网络异常: {e}")
-            continue
-
-    return last_error
-
-# --- 6. 辅助函数：安全提取与解析 ---
-def get_response_text(response):
-    """安全提取响应文本，避免 IndexError"""
-    if not response: return None
-    try:
-        data = response.json()
-        if 'candidates' in data and data['candidates']:
-            parts = data['candidates'][0].get('content', {}).get('parts', [])
-            if parts:
-                return parts[0].get('text', '')
-        return None
-    except Exception as e:
-        return None
-
-def get_response_error(response):
-    """提取接口错误详情，便于定位问题。"""
-    if not response:
-        return "无响应"
-    try:
-        data = response.json()
-        if isinstance(data, dict):
-            if isinstance(data.get("error"), dict):
-                err = data.get("error", {})
-                msg = err.get("message") or json.dumps(err, ensure_ascii=False)
-                return f"HTTP {response.status_code}: {msg}"
-            if data.get("msg"):
-                return f"HTTP {response.status_code}: {data.get('msg')}"
-            return f"HTTP {response.status_code}: {json.dumps(data, ensure_ascii=False)[:400]}"
-    except Exception:
-        pass
-    text = getattr(response, "text", "")
-    text = text[:400] if text else "未知错误"
-    return f"HTTP {getattr(response, 'status_code', 'N/A')}: {text}"
-
-def extract_grounding_sources(response):
-    """
-    从 Gemini grounded response 中提取可点击来源。
-    """
-    if not response:
-        return []
-    try:
-        data = response.json()
-    except Exception:
-        return []
-
-    sources = []
-    seen = set()
-    candidates = data.get("candidates", [])
-    for cand in candidates:
-        meta = cand.get("groundingMetadata", {})
-        chunks = meta.get("groundingChunks", [])
-        for ch in chunks:
-            web_info = ch.get("web", {})
-            uri = web_info.get("uri", "").strip()
-            title = web_info.get("title", "").strip() or "来源"
-            if uri and uri not in seen:
-                seen.add(uri)
-                sources.append({"title": title, "url": uri})
-    return sources
+# --- 5. API 调用由 api_client.py 统一处理（SDK、超时、重试、模型降级）---
 
 def parse_json_response(text):
     if not text: return None
@@ -433,7 +316,7 @@ def delete_favorite(item_id):
 # 侧边栏
 with st.sidebar:
     st.title("⚛️ Nuclear Hub")
-    st.info("**Pro Max v6.3 (Stable)**\n\n修复了结果解析可能导致的崩溃问题。")
+    st.info("**Pro Max v7.0**\n\n已接入 Xiaotiangong Gemini 3 Flash，支持自动重试与模型降级。")
     
     # --- 用户 ID 管理 & 备份 ---
     st.markdown("### 👤 档案管理")
@@ -451,7 +334,11 @@ with st.sidebar:
 
     if not API_KEY:
         st.warning("🔒 未检测到 API Key")
-        API_KEY = st.text_input("请在此临时粘贴 API Key:", type="password", help="建议在 Streamlit Secrets 中配置")
+        API_KEY = st.text_input(
+            "请在此临时粘贴 API Key:",
+            type="password",
+            help="建议在 Streamlit Secrets 中配置 XIAOTIANGONG_API_KEY",
+        )
     
     st.caption("Powered by Google Gemini & Streamlit")
 
@@ -524,20 +411,25 @@ with tab1:
                     ]
                     """
                     
-                    payload = {"contents": [{"parts": [{ "text": prompt_check }]}], "tools": [{"google_search": {}}]}
-                    response = smart_api_call(model_list, payload, API_KEY, status_box)
-                    
-                    # 使用新的安全提取函数
-                    raw_content = get_response_text(response)
+                    result = generate_text(
+                        api_key=API_KEY,
+                        base_url=GEMINI_BASE_URL,
+                        api_version=GEMINI_API_VERSION,
+                        models=model_list,
+                        prompt=prompt_check,
+                        use_search=True,
+                        on_status=status_box.write,
+                    )
+                    raw_content = result.text
 
                     if raw_content:
                         check_results = parse_json_response(raw_content)
-                        grounded_sources = extract_grounding_sources(response)
+                        grounded_sources = result.sources
                         status_box.update(label="分析完成", state="complete", expanded=False)
                         st.session_state["check_result"] = {"data": check_results, "raw": raw_content, "grounded_sources": grounded_sources}
                     else:
                         status_box.update(label="请求失败", state="error")
-                        st.error(f"请求失败或模型未返回内容：{get_response_error(response)}")
+                        st.error(f"请求失败或模型未返回内容：{result.error}")
 
         # 2. 显示逻辑
         if st.session_state.get("check_result"):
@@ -667,20 +559,25 @@ with tab2:
                     }}
                     """
                     
-                    payload = {"contents": [{"parts": [{ "text": prompt_search }]}], "tools": [{"google_search": {}}]}
-                    response = smart_api_call(model_list, payload, API_KEY, status_box_search)
-                    
-                    # 使用新的安全提取函数
-                    raw_content = get_response_text(response)
+                    result = generate_text(
+                        api_key=API_KEY,
+                        base_url=GEMINI_BASE_URL,
+                        api_version=GEMINI_API_VERSION,
+                        models=model_list,
+                        prompt=prompt_search,
+                        use_search=True,
+                        on_status=status_box_search.write,
+                    )
+                    raw_content = result.text
 
                     if raw_content:
                         search_results = parse_json_response(raw_content)
-                        grounded_sources = extract_grounding_sources(response)
+                        grounded_sources = result.sources
                         status_box_search.update(label="检索完成", state="complete", expanded=False)
                         st.session_state["search_result"] = {"data": search_results, "raw": raw_content, "grounded_sources": grounded_sources}
                     else:
                         status_box_search.update(label="请求失败", state="error")
-                        st.error(f"请求失败或模型未返回内容：{get_response_error(response)}")
+                        st.error(f"请求失败或模型未返回内容：{result.error}")
         
         # 2. 显示逻辑
         if st.session_state.get("search_result"):
@@ -871,11 +768,15 @@ several 10s ofMeV energies.”
                     (这里是对应的另一种语言的高水平翻译)
                     """
                     
-                    payload = {"contents": [{"parts": [{ "text": prompt_rewrite }]}]}
-                    response = smart_api_call(model_list, payload, API_KEY, status_box_rewrite)
-                    
-                    # 使用新的安全提取函数
-                    raw_content = get_response_text(response)
+                    result = generate_text(
+                        api_key=API_KEY,
+                        base_url=GEMINI_BASE_URL,
+                        api_version=GEMINI_API_VERSION,
+                        models=model_list,
+                        prompt=prompt_rewrite,
+                        on_status=status_box_rewrite.write,
+                    )
+                    raw_content = result.text
 
                     if raw_content:
                         status_box_rewrite.update(label="润色完成", state="complete", expanded=False)
@@ -894,7 +795,7 @@ several 10s ofMeV energies.”
                         }
                     else:
                         status_box_rewrite.update(label="请求失败", state="error")
-                        st.error(f"请求失败或模型未返回内容：{get_response_error(response)}")
+                        st.error(f"请求失败或模型未返回内容：{result.error}")
 
         if st.session_state.get("rewrite_result"):
             res = st.session_state["rewrite_result"]
